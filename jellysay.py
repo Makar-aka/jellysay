@@ -156,13 +156,20 @@ def is_recent(item, interval_hours):
 
 def check_and_notify():
     items = get_new_items()
+    logging.info(f"Получено элементов из Jellyfin: {len(items)}")
     for item in items:
+        logging.info(f"Проверка элемента: {item.get('Name', 'Без названия')} (ID: {item['Id']})")
+        if not is_sent(item['Id']):
+            logging.info("Ещё не отправляли этот элемент.")
+        if is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
+            logging.info("Элемент свежий.")
         if not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
             poster_url = get_poster_url(item['Id'])
             message = build_message(item)
             send_telegram_photo(poster_url, message)
             mark_as_sent(item['Id'])
             logging.info(f"Новинка отправлена: {item.get('Name', 'Без названия')}")
+            
 
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
