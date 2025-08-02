@@ -86,32 +86,32 @@ def send_telegram_photo(photo_url, caption, chat_id=None):
 def build_message(item):
     item_type = item.get('Type', 'Unknown')
     if item_type == 'Episode':
-        content_type = 'Сериал (серия)'
+        content_type = 'РЎРµСЂРёР°Р» (СЃРµСЂРёСЏ)'
     elif item_type == 'Movie':
-        content_type = 'Фильм'
+        content_type = 'Р¤РёР»СЊРј'
     elif item_type == 'Series':
-        content_type = 'Сериал'
+        content_type = 'РЎРµСЂРёР°Р»'
     else:
         content_type = item_type
 
-    name = item.get('Name', 'Без названия')
-    overview = item.get('Overview', 'Нет описания')
-    year = item.get('ProductionYear', '—')
-    genres = ', '.join(item.get('Genres', [])) if item.get('Genres') else '—'
-    date_added = item.get('DateCreated', '')[:10] if item.get('DateCreated') else '—'
+    name = item.get('Name', 'Р‘РµР· РЅР°Р·РІР°РЅРёСЏ')
+    overview = item.get('Overview', 'РќРµС‚ РѕРїРёСЃР°РЅРёСЏ')
+    year = item.get('ProductionYear', 'вЂ”')
+    genres = ', '.join(item.get('Genres', [])) if item.get('Genres') else 'вЂ”'
+    date_added = item.get('DateCreated', '')[:10] if item.get('DateCreated') else 'вЂ”'
 
     if item_type == 'Episode':
         series_name = item.get('SeriesName', '')
         season = item.get('ParentIndexNumber', '')
         episode = item.get('IndexNumber', '')
-        name = f"{series_name} — S{season:02}E{episode:02} {name}"
+        name = f"{series_name} вЂ” S{season:02}E{episode:02} {name}"
 
     message = (
         f"<b>{name}</b>\n"
-        f"<b>Тип:</b> {content_type}\n"
-        f"<b>Год:</b> {year}\n"
-        f"<b>Жанр:</b> {genres}\n"
-        f"<b>Добавлено:</b> {date_added}\n\n"
+        f"<b>РўРёРї:</b> {content_type}\n"
+        f"<b>Р“РѕРґ:</b> {year}\n"
+        f"<b>Р–Р°РЅСЂ:</b> {genres}\n"
+        f"<b>Р”РѕР±Р°РІР»РµРЅРѕ:</b> {date_added}\n\n"
         f"{overview}"
     )
     return message
@@ -140,31 +140,31 @@ async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     check_and_notify()
-    await update.message.reply_text("Проверка завершена.")
+    await update.message.reply_text("РџСЂРѕРІРµСЂРєР° Р·Р°РІРµСЂС€РµРЅР°.")
 
 async def clean_db_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     clean_db()
-    await update.message.reply_text("База очищена.")
+    await update.message.reply_text("Р‘Р°Р·Р° РѕС‡РёС‰РµРЅР°.")
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     count = count_db()
-    await update.message.reply_text(f"В базе {count} записей.")
+    await update.message.reply_text(f"Р’ Р±Р°Р·Рµ {count} Р·Р°РїРёСЃРµР№.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     help_text = (
-        "<b>Доступные команды:</b>\n"
-        "/force_check — вручную запустить проверку новинок\n"
-        "/clean_db — очистить базу отправленных уведомлений\n"
-        "/stats — показать количество записей в базе\n"
-        "/help — показать это сообщение\n\n"
-        "Бот реагирует только на команды администратора в личных сообщениях. "
-        "Уведомления о новинках отправляются в группу."
+        "<b>Р”РѕСЃС‚СѓРїРЅС‹Рµ РєРѕРјР°РЅРґС‹:</b>\n"
+        "/force_check вЂ” РІСЂСѓС‡РЅСѓСЋ Р·Р°РїСѓСЃС‚РёС‚СЊ РїСЂРѕРІРµСЂРєСѓ РЅРѕРІРёРЅРѕРє\n"
+        "/clean_db вЂ” РѕС‡РёСЃС‚РёС‚СЊ Р±Р°Р·Сѓ РѕС‚РїСЂР°РІР»РµРЅРЅС‹С… СѓРІРµРґРѕРјР»РµРЅРёР№\n"
+        "/stats вЂ” РїРѕРєР°Р·Р°С‚СЊ РєРѕР»РёС‡РµСЃС‚РІРѕ Р·Р°РїРёСЃРµР№ РІ Р±Р°Р·Рµ\n"
+        "/help вЂ” РїРѕРєР°Р·Р°С‚СЊ СЌС‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ\n\n"
+        "Р‘РѕС‚ СЂРµР°РіРёСЂСѓРµС‚ С‚РѕР»СЊРєРѕ РЅР° РєРѕРјР°РЅРґС‹ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РІ Р»РёС‡РЅС‹С… СЃРѕРѕР±С‰РµРЅРёСЏС…. "
+        "РЈРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРѕРІРёРЅРєР°С… РѕС‚РїСЂР°РІР»СЏСЋС‚СЃСЏ РІ РіСЂСѓРїРїСѓ."
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
 
@@ -177,7 +177,7 @@ def start_polling():
         app.add_handler(CommandHandler("clean_db", clean_db_cmd))
         app.add_handler(CommandHandler("stats", stats_cmd))
         app.add_handler(CommandHandler("help", help_cmd))
-        # Игнорировать все остальные сообщения
+        # РРіРЅРѕСЂРёСЂРѕРІР°С‚СЊ РІСЃРµ РѕСЃС‚Р°Р»СЊРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
         app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
         await app.start()
         await app.updater.start_polling()
@@ -193,7 +193,7 @@ def start_polling():
         app.add_handler(CommandHandler("force_check", force_check))
         app.add_handler(CommandHandler("clean_db", clean_db_cmd))
         app.add_handler(CommandHandler("stats", stats_cmd))
-        # Игнорировать все остальные сообщения
+        # РРіРЅРѕСЂРёСЂРѕРІР°С‚СЊ РІСЃРµ РѕСЃС‚Р°Р»СЊРЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
         app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
         await app.start()
         await app.updater.start_polling()
@@ -203,14 +203,14 @@ def start_polling():
 
 def main():
     init_db()
-    # Запуск Telegram-бота в отдельном потоке
+    # Р—Р°РїСѓСЃРє Telegram-Р±РѕС‚Р° РІ РѕС‚РґРµР»СЊРЅРѕРј РїРѕС‚РѕРєРµ
     Thread(target=start_polling, daemon=True).start()
-    # Основной цикл проверки новинок
+    # РћСЃРЅРѕРІРЅРѕР№ С†РёРєР» РїСЂРѕРІРµСЂРєРё РЅРѕРІРёРЅРѕРє
     while True:
         try:
             check_and_notify()
         except Exception as e:
-            print(f'Ошибка: {e}')
+            print(f'РћС€РёР±РєР°: {e}')
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == '__main__':
