@@ -36,7 +36,7 @@ TELEGRAM_ADMIN_ID = int(os.getenv('TELEGRAM_ADMIN_ID'))
 CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 600))
 NEW_ITEMS_INTERVAL_HOURS = int(os.getenv('NEW_ITEMS_INTERVAL_HOURS', 24))
 
-DB_FILE = 'sent_items.db'
+DB_FILE = os.getenv('DB_FILE', 'sent_items.db')
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)

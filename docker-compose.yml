@@ -1,0 +1,9 @@
+services:
+  jellysay:
+    build: https://github.com/Makar-aka/jellysay.git
+    container_name: jellysay
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
