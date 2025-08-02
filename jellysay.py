@@ -216,7 +216,7 @@ def start_check_loop():
         time.sleep(CHECK_INTERVAL)
 
 async def main_async():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).job_queue(None).build()
     app.add_handler(CommandHandler("force_check", force_check))
     app.add_handler(CommandHandler("clean_db", clean_db_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
