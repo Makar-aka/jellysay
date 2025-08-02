@@ -169,7 +169,19 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
 
-def start_polling():
+def start_check_loop():
+    while True:
+        try:
+            check_and_notify()
+        except Exception as e:
+            print(f'Ошибка: {e}')
+        time.sleep(CHECK_INTERVAL)
+
+def main():
+    init_db()
+    # Запуск фоновой проверки в отдельном потоке
+    Thread(target=start_check_loop, daemon=True).start()
+    # Telegram-бот в главном потоке
     import asyncio
 
     async def main_async():
@@ -182,18 +194,6 @@ def start_polling():
         await app.run_polling()
 
     asyncio.run(main_async())
-
-def main():
-    init_db()
-    # Запуск Telegram-бота в отдельном потоке
-    Thread(target=start_polling, daemon=True).start()
-    # Основной цикл проверки новинок
-    while True:
-        try:
-            check_and_notify()
-        except Exception as e:
-            print(f'Ошибка: {e}')
-        time.sleep(CHECK_INTERVAL)
 
 if __name__ == '__main__':
     main()
