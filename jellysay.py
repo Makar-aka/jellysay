@@ -12,8 +12,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 )
 
-from jellyfinapi.api_client import ApiClient
-from jellyfinapi.apis.tags.items_api import ItemsApi
+from jellyfin_api import JellyfinClient
 
 # Настройка логирования
 logging.basicConfig(
@@ -80,29 +79,20 @@ def count_db():
     return count
 
 def get_new_items():
-    client = ApiClient(
-        base_url=JELLYFIN_URL,
-        api_key=JELLYFIN_API_KEY,
-        user_id=JELLYFIN_USER_ID
-    )
-    items_api = ItemsApi(client)
+    client = JellyfinClient(JELLYFIN_URL, JELLYFIN_API_KEY)
     try:
-        response = items_api.get_items_latest(
-            user_id=JELLYFIN_USER_ID,
-            limit=20
-        )
-        logging.info("Получены новинки с Jellyfin через jellyfinapi.")
-        return [item.to_dict() for item in response]
+        items = client.items.latest(user_id=JELLYFIN_USER_ID, limit=20)
+        logging.info("Получены новинки с Jellyfin через jellyfin-api-client.")
+        return items
     except Exception as e:
         logging.error(f"Jellyfin API error: {e}")
         return []
 
 def get_poster_url(item_id):
-    # jellyfinapi не предоставляет прямой метод для получения URL постера, поэтому формируем вручную
     return f"{JELLYFIN_URL}/Items/{item_id}/Images/Primary?maxWidth=600&tag=&quality=90&X-Emby-Token={JELLYFIN_API_KEY}"
 
 def build_message(item):
-    item_type = item.get('type', item.get('Type', 'Unknown'))
+    item_type = item.get('Type', item.get('type', 'Unknown'))
     if item_type == 'Episode':
         content_type = 'Сериал (серия)'
     elif item_type == 'Movie':
@@ -112,16 +102,16 @@ def build_message(item):
     else:
         content_type = item_type
 
-    name = item.get('name', item.get('Name', 'Без названия'))
-    overview = item.get('overview', item.get('Overview', 'Нет описания'))
-    year = item.get('production_year', item.get('ProductionYear', '—'))
-    genres = ', '.join(item.get('genres', item.get('Genres', []))) if item.get('genres', item.get('Genres')) else '—'
-    date_added = item.get('date_created', item.get('DateCreated', ''))[:10] if item.get('date_created', item.get('DateCreated')) else '—'
+    name = item.get('Name', item.get('name', 'Без названия'))
+    overview = item.get('Overview', item.get('overview', 'Нет описания'))
+    year = item.get('ProductionYear', item.get('production_year', '—'))
+    genres = ', '.join(item.get('Genres', item.get('genres', []))) if item.get('Genres', item.get('genres')) else '—'
+    date_added = item.get('DateCreated', item.get('date_created', ''))[:10] if item.get('DateCreated', item.get('date_created')) else '—'
 
     if item_type == 'Episode':
-        series_name = item.get('series_name', item.get('SeriesName', ''))
-        season = item.get('parent_index_number', item.get('ParentIndexNumber', ''))
-        episode = item.get('index_number', item.get('IndexNumber', ''))
+        series_name = item.get('SeriesName', item.get('series_name', ''))
+        season = item.get('ParentIndexNumber', item.get('parent_index_number', ''))
+        episode = item.get('IndexNumber', item.get('index_number', ''))
         name = f"{series_name} — S{season:02}E{episode:02} {name}"
 
     message = (
@@ -135,18 +125,18 @@ def build_message(item):
     return message
 
 def is_recent(item, interval_hours):
-    date_str = item.get('date_created', item.get('DateCreated'))
+    date_str = item.get('DateCreated', item.get('date_created'))
     if not date_str:
-        logging.info(f"Нет DateCreated для {item.get('name', item.get('Name', 'Без названия'))}")
+        logging.info(f"Нет DateCreated для {item.get('Name', item.get('name', 'Без названия'))}")
         return False
     try:
         dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         now = datetime.now(timezone.utc)
         delta = now - dt
-        logging.info(f"{item.get('name', item.get('Name', 'Без названия'))}: DateCreated={dt}, now={now}, delta={delta}, threshold={timedelta(hours=interval_hours)}")
+        logging.info(f"{item.get('Name', item.get('name', 'Без названия'))}: DateCreated={dt}, now={now}, delta={delta}, threshold={timedelta(hours=interval_hours)}")
         return delta <= timedelta(hours=interval_hours)
     except Exception as e:
-        logging.error(f"Ошибка разбора даты для {item.get('name', item.get('Name', 'Без названия'))}: {e}")
+        logging.error(f"Ошибка разбора даты для {item.get('Name', item.get('name', 'Без названия'))}: {e}")
         return False
 
 def send_telegram_photo(photo_url, caption, chat_id=None):
@@ -170,8 +160,8 @@ def check_and_notify():
     items = get_new_items()
     logging.info(f"Получено элементов из Jellyfin: {len(items)}")
     for item in items:
-        item_id = item.get('id', item.get('Id'))
-        name = item.get('name', item.get('Name', 'Без названия'))
+        item_id = item.get('Id', item.get('id'))
+        name = item.get('Name', item.get('name', 'Без названия'))
         already_sent = is_sent(item_id)
         recent = is_recent(item, NEW_ITEMS_INTERVAL_HOURS)
         logging.info(f"Проверка: {name} (ID: {item_id}) | Уже отправляли: {already_sent} | Свежий: {recent}")
