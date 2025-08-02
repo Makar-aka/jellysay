@@ -65,7 +65,7 @@ def count_db():
 
 def get_new_items():
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
-    url = f'{JELLYFIN_URL}/Users/{JELLYFIN_USER_ID}/Items/Latest'
+    url = f'{JELLYFIN_URL}/Items/Latest'
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     return response.json()
