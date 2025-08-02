@@ -84,8 +84,12 @@ def get_new_items():
     try:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
+        items = response.json()
+        # Отладочный вывод
+        for item in items:
+            logging.info(f"Элемент {item.get('Name')}: {json.dumps(item, ensure_ascii=False, indent=2)}")
         logging.info("Получены новинки с Jellyfin.")
-        return response.json()
+        return items
     except Exception as e:
         logging.error(f"Jellyfin API error: {e}")
         return []
@@ -128,6 +132,7 @@ def build_message(item):
 
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
+    logging.info(f"Проверка даты для {item.get('Name')}: {json.dumps(item, ensure_ascii=False, indent=2)}")
     if not date_str:
         logging.info(f"Нет DateCreated для {item.get('Name', 'Без названия')}")
         return False
