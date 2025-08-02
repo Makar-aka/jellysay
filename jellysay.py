@@ -12,7 +12,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 )
 
-from jellyfin_api import JellyfinClient
+from jellyfin_api_client import JellyfinClient
 
 # Настройка логирования
 logging.basicConfig(
