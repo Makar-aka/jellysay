@@ -169,14 +169,25 @@ def is_recent(item, interval_hours):
 
 def send_telegram_photo(photo_url, caption, chat_id=None):
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto'
-    payload = {
-        'chat_id': chat_id or TELEGRAM_CHAT_ID,
-        'photo': photo_url,
-        'caption': caption,
-        'parse_mode': 'HTML'
-    }
+    
     try:
-        resp = requests.post(url, data=payload)
+        # Сначала загружаем изображение
+        photo_response = requests.get(photo_url)
+        if photo_response.status_code != 200:
+            logging.error(f"Ошибка получения изображения: {photo_response.status_code}")
+            return
+            
+        # Отправляем как файл
+        files = {
+            'photo': ('poster.jpg', photo_response.content)
+        }
+        payload = {
+            'chat_id': chat_id or TELEGRAM_CHAT_ID,
+            'caption': caption,
+            'parse_mode': 'HTML'
+        }
+        
+        resp = requests.post(url, data=payload, files=files)
         if resp.status_code == 200:
             logging.info(f"Отправлено сообщение в Telegram: {caption[:40]}...")
         else:
