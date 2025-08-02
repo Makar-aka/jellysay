@@ -65,7 +65,7 @@ def count_db():
 
 def get_new_items():
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
-    params = {'Limit': 20}  # Можно изменить лимит по желанию
+    params = {'Limit': 20, 'userId': JELLYFIN_USER_ID}
     url = f'{JELLYFIN_URL}/Items/Latest'
     response = requests.get(url, headers=headers, params=params)
     response.raise_for_status()
@@ -178,27 +178,8 @@ def start_polling():
         app.add_handler(CommandHandler("clean_db", clean_db_cmd))
         app.add_handler(CommandHandler("stats", stats_cmd))
         app.add_handler(CommandHandler("help", help_cmd))
-        # Игнорировать все остальные сообщения
         app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
-        await app.start()
-        await app.updater.start_polling()
-        await app.updater.idle()
-
-    asyncio.run(main_async())
-
-def start_polling():
-    import asyncio
-
-    async def main_async():
-        app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-        app.add_handler(CommandHandler("force_check", force_check))
-        app.add_handler(CommandHandler("clean_db", clean_db_cmd))
-        app.add_handler(CommandHandler("stats", stats_cmd))
-        # Игнорировать все остальные сообщения
-        app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
-        await app.start()
-        await app.updater.start_polling()
-        await app.updater.idle()
+        await app.run_polling()
 
     asyncio.run(main_async())
 
