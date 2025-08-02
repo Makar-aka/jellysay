@@ -197,7 +197,68 @@ def build_message(item):
     )
     return message
 
-# Остальные функции (is_recent, send_telegram_photo, check_and_notify, force_check, clean_db_cmd, stats_cmd, help_cmd, start_check_loop) без изменений
+def is_recent(item, interval_hours):
+    date_str = item.get('DateCreated')
+    if not date_str:
+        return False
+    try:
+        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        return now - dt <= timedelta(hours=interval_hours)
+    except Exception:
+        return False
+
+def send_telegram_photo(photo_url, caption, chat_id=None):
+    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto'
+    payload = {
+        'chat_id': chat_id or TELEGRAM_CHAT_ID,
+        'photo': photo_url,
+        'caption': caption,
+        'parse_mode': 'HTML'
+    }
+    try:
+        resp = requests.post(url, data=payload)
+        if resp.status_code == 200:
+            logging.info(f"Отправлено сообщение в Telegram: {caption[:40]}...")
+        else:
+            logging.error(f"Ошибка отправки в Telegram: {resp.status_code} {resp.text}")
+    except Exception as e:
+        logging.error(f"Ошибка отправки в Telegram: {e}")
+
+def check_and_notify():
+    items = get_new_items()
+    logging.info(f"Получено элементов из Jellyfin: {len(items)}")
+    for item in items:
+        item_id = item['Id']
+        name = item.get('Name', 'Без названия')
+        already_sent = is_sent(item_id)
+        recent = is_recent(item, NEW_ITEMS_INTERVAL_HOURS)
+        logging.info(f"Проверка: {name} (ID: {item_id}) | Уже отправляли: {already_sent} | Свежий: {recent}")
+        if not already_sent and recent:
+            logging.info(f"Попытка отправки: {name} (ID: {item_id})")
+            poster_url = get_poster_url(item_id)
+            message = build_message(item)
+            send_telegram_photo(poster_url, message)
+            mark_as_sent(item_id)
+            logging.info(f"Новинка отправлена: {name}")
+
+async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
+        return
+    check_and_notify()
+    await update.message.reply_text("Проверка завершена.")
+
+async def clean_db_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
+        return
+    clean_db()
+    await update.message.reply_text("База очищена.")
+
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
+        return
+    count = count_db()
+    await update.message.reply_text(f"В базе {count} записей.")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
@@ -214,6 +275,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
 
+def start_check_loop():
+    while True:
+        try:
+            check_and_notify()
+        except Exception as e:
+            logging.error(f'Ошибка: {e}')
+        time.sleep(CHECK_INTERVAL)
+
 async def main_async():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("force_check", force_check))
@@ -224,14 +293,6 @@ async def main_async():
     app.add_handler(CallbackQueryHandler(libraries_callback))
     app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
     await app.run_polling()
-
-def start_check_loop():
-    while True:
-        try:
-            check_and_notify()
-        except Exception as e:
-            logging.error(f'Ошибка: {e}')
-        time.sleep(CHECK_INTERVAL)
 
 def main():
     init_db()
