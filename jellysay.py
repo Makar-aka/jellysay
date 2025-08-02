@@ -4,12 +4,19 @@ import time
 import os
 import sqlite3
 import asyncio
+import logging
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from threading import Thread
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
 load_dotenv()
@@ -35,6 +42,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    logging.info("Инициализирована база данных.")
 
 def is_sent(item_id):
     conn = sqlite3.connect(DB_FILE)
@@ -50,6 +58,7 @@ def mark_as_sent(item_id):
     c.execute('INSERT OR IGNORE INTO sent_items (item_id) VALUES (?)', (item_id,))
     conn.commit()
     conn.close()
+    logging.info(f"Добавлен ID в базу: {item_id}")
 
 def clean_db():
     conn = sqlite3.connect(DB_FILE)
@@ -57,6 +66,7 @@ def clean_db():
     c.execute('DELETE FROM sent_items')
     conn.commit()
     conn.close()
+    logging.info("База очищена.")
 
 def count_db():
     conn = sqlite3.connect(DB_FILE)
@@ -64,17 +74,19 @@ def count_db():
     c.execute('SELECT COUNT(*) FROM sent_items')
     count = c.fetchone()[0]
     conn.close()
+    logging.info(f"Количество записей в базе: {count}")
     return count
 
 def get_new_items():
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
     params = {'Limit': 20, 'userId': JELLYFIN_USER_ID}
     url = f'{JELLYFIN_URL}/Items/Latest'
-    response = requests.get(url, headers=headers, params=params)
     try:
+        response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
+        logging.info("Получены новинки с Jellyfin.")
     except Exception as e:
-        print(f"Jellyfin API error: {e}\nResponse: {response.text}")
+        logging.error(f"Jellyfin API error: {e}\nResponse: {getattr(e, 'response', None)}")
         raise
     return response.json()
 
@@ -89,7 +101,14 @@ def send_telegram_photo(photo_url, caption, chat_id=None):
         'caption': caption,
         'parse_mode': 'HTML'
     }
-    requests.post(url, data=payload)
+    try:
+        resp = requests.post(url, data=payload)
+        if resp.status_code == 200:
+            logging.info(f"Отправлено сообщение в Telegram: {caption[:40]}...")
+        else:
+            logging.error(f"Ошибка отправки в Telegram: {resp.status_code} {resp.text}")
+    except Exception as e:
+        logging.error(f"Ошибка отправки в Telegram: {e}")
 
 def build_message(item):
     item_type = item.get('Type', 'Unknown')
@@ -143,6 +162,7 @@ def check_and_notify():
             message = build_message(item)
             send_telegram_photo(poster_url, message)
             mark_as_sent(item['Id'])
+            logging.info(f"Новинка отправлена: {item.get('Name', 'Без названия')}")
 
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
@@ -181,7 +201,7 @@ def start_check_loop():
         try:
             check_and_notify()
         except Exception as e:
-            print(f'Ошибка: {e}')
+            logging.error(f'Ошибка: {e}')
         time.sleep(CHECK_INTERVAL)
 
 async def main_async():
@@ -196,10 +216,10 @@ async def main_async():
 def main():
     init_db()
     Thread(target=start_check_loop, daemon=True).start()
-    import asyncio
-    loop = asyncio.get_event_loop()
     import nest_asyncio
+    import asyncio
     nest_asyncio.apply()
+    loop = asyncio.get_event_loop()
     loop.create_task(main_async())
     loop.run_forever()
 
