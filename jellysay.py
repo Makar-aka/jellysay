@@ -3,6 +3,7 @@ import json
 import time
 import os
 import sqlite3
+import asyncio
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from threading import Thread
@@ -177,22 +178,20 @@ def start_check_loop():
             print(f'Ошибка: {e}')
         time.sleep(CHECK_INTERVAL)
 
+async def main_async():
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("force_check", force_check))
+    app.add_handler(CommandHandler("clean_db", clean_db_cmd))
+    app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
+    await app.run_polling()
+
 def main():
     init_db()
     # Запуск фоновой проверки в отдельном потоке
     Thread(target=start_check_loop, daemon=True).start()
     # Telegram-бот в главном потоке
-    import asyncio
-
-    async def main_async():
-        app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-        app.add_handler(CommandHandler("force_check", force_check))
-        app.add_handler(CommandHandler("clean_db", clean_db_cmd))
-        app.add_handler(CommandHandler("stats", stats_cmd))
-        app.add_handler(CommandHandler("help", help_cmd))
-        app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
-        await app.run_polling()
-
     asyncio.run(main_async())
 
 if __name__ == '__main__':
