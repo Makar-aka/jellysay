@@ -8,9 +8,9 @@ import logging
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 )
 
 # Настройка логирования
@@ -31,7 +31,6 @@ CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', 600))
 NEW_ITEMS_INTERVAL_HOURS = int(os.getenv('NEW_ITEMS_INTERVAL_HOURS', 24))
 
 DB_FILE = 'sent_items.db'
-LIBRARIES_FILE = "scan_libraries.json"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -78,91 +77,14 @@ def count_db():
     logging.info(f"Количество записей в базе: {count}")
     return count
 
-def get_libraries():
-    headers = {'X-Emby-Token': JELLYFIN_API_KEY}
-    url = f"{JELLYFIN_URL}/Users/{JELLYFIN_USER_ID}/Views"
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    return response.json().get("Items", [])
-
-def load_selected_libraries():
-    if os.path.exists(LIBRARIES_FILE):
-        with open(LIBRARIES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-def save_selected_libraries(library_ids):
-    with open(LIBRARIES_FILE, "w", encoding="utf-8") as f:
-        json.dump(library_ids, f)
-
 def get_new_items():
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
-    selected_libraries = load_selected_libraries()
-    all_items = []
-    if not selected_libraries:
-        params = {'Limit': 20, 'userId': JELLYFIN_USER_ID}
-        url = f'{JELLYFIN_URL}/Items/Latest'
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        logging.info("Получены новинки со всех библиотек Jellyfin.")
-        return response.json()
-    for lib_id in selected_libraries:
-        params = {'Limit': 20, 'userId': JELLYFIN_USER_ID, 'ParentId': lib_id}
-        url = f'{JELLYFIN_URL}/Items/Latest'
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        items = response.json()
-        all_items.extend(items)
-    logging.info(f"Получены новинки из выбранных библиотек Jellyfin: {selected_libraries}")
-    return all_items
-
-async def libraries_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
-        return
-    libraries = get_libraries()
-    selected = set(load_selected_libraries())
-    keyboard = []
-    for lib in libraries:
-        checked = "✅" if lib["Id"] in selected else "❌"
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{checked} {lib['Name']}", callback_data=f"togglelib_{lib['Id']}"
-            )
-        ])
-    keyboard.append([InlineKeyboardButton("Сохранить", callback_data="save_libs")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Выберите библиотеки для сканирования:", reply_markup=reply_markup)
-
-async def libraries_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != TELEGRAM_ADMIN_ID:
-        return
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    selected = set(load_selected_libraries())
-    libraries = get_libraries()
-    if data.startswith("togglelib_"):
-        lib_id = data.split("_", 1)[1]
-        if lib_id in selected:
-            selected.remove(lib_id)
-        else:
-            selected.add(lib_id)
-        keyboard = []
-        for lib in libraries:
-            checked = "✅" if lib["Id"] in selected else "❌"
-            keyboard.append([
-                InlineKeyboardButton(
-                    f"{checked} {lib['Name']}", callback_data=f"togglelib_{lib['Id']}"
-                )
-            ])
-        keyboard.append([InlineKeyboardButton("Сохранить", callback_data="save_libs")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("Выберите библиотеки для сканирования:", reply_markup=reply_markup)
-        context.user_data["selected_libraries"] = list(selected)
-    elif data == "save_libs":
-        libs = context.user_data.get("selected_libraries", list(selected))
-        save_selected_libraries(libs)
-        await query.edit_message_text("Настройки библиотек сохранены.")
+    params = {'Limit': 20, 'userId': JELLYFIN_USER_ID}
+    url = f'{JELLYFIN_URL}/Items/Latest'
+    response = requests.get(url, headers=headers, params=params)
+    response.raise_for_status()
+    logging.info("Получены новинки с Jellyfin.")
+    return response.json()
 
 def build_message(item):
     item_type = item.get('Type', 'Unknown')
@@ -268,7 +190,6 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/force_check — вручную запустить проверку новинок\n"
         "/clean_db — очистить базу отправленных уведомлений\n"
         "/stats — показать количество записей в базе\n"
-        "/libraries — выбрать библиотеки для сканирования\n"
         "/help — показать это сообщение\n\n"
         "Бот реагирует только на команды администратора в личных сообщениях. "
         "Уведомления о новинках отправляются в группу."
@@ -289,8 +210,6 @@ async def main_async():
     app.add_handler(CommandHandler("clean_db", clean_db_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("libraries", libraries_cmd))
-    app.add_handler(CallbackQueryHandler(libraries_callback))
     app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
     await app.run_polling()
 
