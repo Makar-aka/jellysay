@@ -122,12 +122,16 @@ def build_message(item):
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
     if not date_str:
+        logging.info(f"Нет DateCreated для {item.get('Name', 'Без названия')}")
         return False
     try:
         dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
         now = datetime.now(timezone.utc)
-        return now - dt <= timedelta(hours=interval_hours)
-    except Exception:
+        delta = now - dt
+        logging.info(f"{item.get('Name', 'Без названия')}: DateCreated={dt}, now={now}, delta={delta}, threshold={timedelta(hours=interval_hours)}")
+        return delta <= timedelta(hours=interval_hours)
+    except Exception as e:
+        logging.error(f"Ошибка разбора даты для {item.get('Name', 'Без названия')}: {e}")
         return False
 
 def send_telegram_photo(photo_url, caption, chat_id=None):
