@@ -197,17 +197,11 @@ def main():
     init_db()
     Thread(target=start_check_loop, daemon=True).start()
     import asyncio
-    try:
-        asyncio.run(main_async())
-    except RuntimeError as e:
-        if "already running" in str(e):
-            import nest_asyncio
-            nest_asyncio.apply()
-            loop = asyncio.get_event_loop()
-            loop.create_task(main_async())
-            loop.run_forever()
-        else:
-            raise
+    loop = asyncio.get_event_loop()
+    import nest_asyncio
+    nest_asyncio.apply()
+    loop.create_task(main_async())
+    loop.run_forever()
 
 if __name__ == '__main__':
     main()
