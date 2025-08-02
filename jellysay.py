@@ -158,17 +158,18 @@ def check_and_notify():
     items = get_new_items()
     logging.info(f"Получено элементов из Jellyfin: {len(items)}")
     for item in items:
-        logging.info(f"Проверка элемента: {item.get('Name', 'Без названия')} (ID: {item['Id']})")
-        if not is_sent(item['Id']):
-            logging.info("Ещё не отправляли этот элемент.")
-        if is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
-            logging.info("Элемент свежий.")
-        if not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
-            poster_url = get_poster_url(item['Id'])
+        item_id = item['Id']
+        name = item.get('Name', 'Без названия')
+        already_sent = is_sent(item_id)
+        recent = is_recent(item, NEW_ITEMS_INTERVAL_HOURS)
+        logging.info(f"Проверка: {name} (ID: {item_id}) | Уже отправляли: {already_sent} | Свежий: {recent}")
+        if not already_sent and recent:
+            logging.info(f"Попытка отправки: {name} (ID: {item_id})")
+            poster_url = get_poster_url(item_id)
             message = build_message(item)
             send_telegram_photo(poster_url, message)
-            mark_as_sent(item['Id'])
-            logging.info(f"Новинка отправлена: {item.get('Name', 'Без названия')}")
+            mark_as_sent(item_id)
+            logging.info(f"Новинка отправлена: {name}")
             
 
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
