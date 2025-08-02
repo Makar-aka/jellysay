@@ -225,6 +225,14 @@ async def main_async():
     app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
     await app.run_polling()
 
+def start_check_loop():
+    while True:
+        try:
+            check_and_notify()
+        except Exception as e:
+            logging.error(f'Ошибка: {e}')
+        time.sleep(CHECK_INTERVAL)
+
 def main():
     init_db()
     Thread(target=start_check_loop, daemon=True).start()
