@@ -69,7 +69,11 @@ def get_new_items():
     params = {'Limit': 20, 'userId': JELLYFIN_USER_ID}
     url = f'{JELLYFIN_URL}/Items/Latest'
     response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Jellyfin API error: {e}\nResponse: {response.text}")
+        raise
     return response.json()
 
 def get_poster_url(item_id):
@@ -189,10 +193,14 @@ async def main_async():
 
 def main():
     init_db()
-    # Запуск фоновой проверки в отдельном потоке
     Thread(target=start_check_loop, daemon=True).start()
-    # Telegram-бот в главном потоке
-    asyncio.run(main_async())
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        import nest_asyncio
+        nest_asyncio.apply()
+        loop.create_task(main_async())
+    else:
+        loop.run_until_complete(main_async())
 
 if __name__ == '__main__':
     main()
