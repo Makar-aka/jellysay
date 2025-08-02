@@ -84,7 +84,7 @@ def get_new_items():
     params = {
         'Limit': 20, 
         'userId': JELLYFIN_USER_ID,
-        'Fields': 'DateCreated,DateLastMediaAdded,PremiereDate'  # Запрашиваем дополнительные поля
+        'Fields': 'DateCreated,DateLastMediaAdded,PremiereDate'
     }
     url = f'{JELLYFIN_URL}/Items/Latest'
     
@@ -93,7 +93,7 @@ def get_new_items():
         response.raise_for_status()
         items = response.json()
         
-        # Теперь получаем полную информацию для каждого элемента
+        # Получаем полную информацию для каждого элемента
         full_items = []
         for item in items:
             item_id = item['Id']
@@ -102,9 +102,9 @@ def get_new_items():
             if item_response.status_code == 200:
                 full_item = item_response.json()
                 full_items.append(full_item)
-                logging.info(f"Получена полная информация для {full_item.get('Name')}")
+                logging.info(f"Получена информация: {full_item.get('Name')}")
             
-        logging.info(f"Получены новинки с Jellyfin (всего: {len(full_items)})")
+        logging.info(f"Получено {len(full_items)} элементов из Jellyfin")
         return full_items
     except Exception as e:
         logging.error(f"Jellyfin API error: {e}")
@@ -148,7 +148,6 @@ def build_message(item):
 
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
-    logging.info(f"Проверка даты для {item.get('Name')}: {json.dumps(item, ensure_ascii=False, indent=2)}")
     if not date_str:
         logging.info(f"Нет DateCreated для {item.get('Name', 'Без названия')}")
         return False
@@ -161,10 +160,10 @@ def is_recent(item, interval_hours):
         dt = datetime.fromisoformat(date_str)
         now = datetime.now(timezone.utc)
         delta = now - dt
-        logging.info(f"{item.get('Name', 'Без названия')}: DateCreated={dt}, now={now}, delta={delta}, threshold={timedelta(hours=interval_hours)}")
+        logging.info(f"Проверка даты {item.get('Name', 'Без названия')}: {dt} -> {delta} (порог: {timedelta(hours=interval_hours)})")
         return delta <= timedelta(hours=interval_hours)
     except Exception as e:
-        logging.error(f"Ошибка разбора даты для {item.get('Name', 'Без названия')}: {e}, исходная дата: {item.get('DateCreated')}")
+        logging.error(f"Ошибка разбора даты для {item.get('Name', 'Без названия')}: {e}")
         return False
 
 def send_telegram_photo(photo_url, caption, chat_id=None):
