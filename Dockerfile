@@ -10,12 +10,11 @@ RUN mkdir -p /app/data
 
 # Копирование файлов проекта
 COPY jellysay.py .
-COPY .env .
 
 # Создание volume для базы данных
 VOLUME /app/data
 
-# Переопределение пути к базе данных
+# Установка переменных окружения напрямую
 ENV DB_FILE=/app/data/sent_items.db
 
 CMD ["python", "jellysay.py"]
