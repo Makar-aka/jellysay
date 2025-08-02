@@ -79,17 +79,33 @@ def count_db():
 
 def get_new_items():
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
-    params = {'Limit': 20, 'userId': JELLYFIN_USER_ID}
+    
+    # Сначала получаем список последних элементов
+    params = {
+        'Limit': 20, 
+        'userId': JELLYFIN_USER_ID,
+        'Fields': 'DateCreated,DateLastMediaAdded,PremiereDate'  # Запрашиваем дополнительные поля
+    }
     url = f'{JELLYFIN_URL}/Items/Latest'
+    
     try:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         items = response.json()
-        # Отладочный вывод
+        
+        # Теперь получаем полную информацию для каждого элемента
+        full_items = []
         for item in items:
-            logging.info(f"Элемент {item.get('Name')}: {json.dumps(item, ensure_ascii=False, indent=2)}")
-        logging.info("Получены новинки с Jellyfin.")
-        return items
+            item_id = item['Id']
+            item_url = f'{JELLYFIN_URL}/Items/{item_id}'
+            item_response = requests.get(item_url, headers=headers, params={'userId': JELLYFIN_USER_ID})
+            if item_response.status_code == 200:
+                full_item = item_response.json()
+                full_items.append(full_item)
+                logging.info(f"Получена полная информация для {full_item.get('Name')}")
+            
+        logging.info(f"Получены новинки с Jellyfin (всего: {len(full_items)})")
+        return full_items
     except Exception as e:
         logging.error(f"Jellyfin API error: {e}")
         return []
