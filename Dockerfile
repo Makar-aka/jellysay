@@ -10,7 +10,7 @@ RUN mkdir -p /app/data
 
 # Копирование файлов проекта
 COPY jellysay.py .
-COPY .env .
+COPY . .
 
 # Создание volume для базы данных
 VOLUME /app/data
