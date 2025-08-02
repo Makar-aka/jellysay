@@ -155,9 +155,10 @@ def is_recent(item, interval_hours):
         # Обрезаем до формата 2025-07-21T11:21:02
         if '.' in date_str:
             date_str = date_str.split('.')[0]  # Убираем микросекунды
-        date_str = date_str.replace('Z', '+00:00')  # Заменяем Z на таймзону
+        date_str = date_str.replace('Z', '')  # Убираем Z
         
-        dt = datetime.fromisoformat(date_str)
+        # Создаем aware datetime (с UTC зоной)
+        dt = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         delta = now - dt
         logging.info(f"Проверка даты {item.get('Name', 'Без названия')}: {dt} -> {delta} (порог: {timedelta(hours=interval_hours)})")
