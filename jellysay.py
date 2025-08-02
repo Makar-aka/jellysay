@@ -3,11 +3,14 @@ import json
 import time
 import os
 import sqlite3
+import asyncio
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 from threading import Thread
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+)
 
 load_dotenv()
 
@@ -141,25 +144,25 @@ def check_and_notify():
             send_telegram_photo(poster_url, message)
             mark_as_sent(item['Id'])
 
-def force_check(update: Update, context):
+async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     check_and_notify()
-    update.message.reply_text("Проверка завершена.")
+    await update.message.reply_text("Проверка завершена.")
 
-def clean_db_cmd(update: Update, context):
+async def clean_db_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     clean_db()
-    update.message.reply_text("База очищена.")
+    await update.message.reply_text("База очищена.")
 
-def stats_cmd(update: Update, context):
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     count = count_db()
-    update.message.reply_text(f"В базе {count} записей.")
+    await update.message.reply_text(f"В базе {count} записей.")
 
-def help_cmd(update: Update, context):
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
     help_text = (
@@ -171,7 +174,7 @@ def help_cmd(update: Update, context):
         "Бот реагирует только на команды администратора в личных сообщениях. "
         "Уведомления о новинках отправляются в группу."
     )
-    update.message.reply_text(help_text, parse_mode="HTML")
+    await update.message.reply_text(help_text, parse_mode="HTML")
 
 def start_check_loop():
     while True:
@@ -181,18 +184,19 @@ def start_check_loop():
             print(f'Ошибка: {e}')
         time.sleep(CHECK_INTERVAL)
 
+async def main_async():
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("force_check", force_check))
+    app.add_handler(CommandHandler("clean_db", clean_db_cmd))
+    app.add_handler(CommandHandler("stats", stats_cmd))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
+    await app.run_polling()
+
 def main():
     init_db()
     Thread(target=start_check_loop, daemon=True).start()
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("force_check", force_check))
-    dp.add_handler(CommandHandler("clean_db", clean_db_cmd))
-    dp.add_handler(CommandHandler("stats", stats_cmd))
-    dp.add_handler(CommandHandler("help", help_cmd))
-    dp.add_handler(MessageHandler(Filters.all, lambda update, context: None))
-    updater.start_polling()
-    updater.idle()
+    asyncio.run(main_async())
 
 if __name__ == '__main__':
     main()
