@@ -415,38 +415,40 @@ async def start_check_loop():
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def main_async():
-    # Отключаем встроенные логи Application
     application = (ApplicationBuilder()
                   .token(TELEGRAM_BOT_TOKEN)
                   .job_queue(None)
                   .write_timeout(30)
                   .read_timeout(30)
                   .build())
-    
+
     application.add_handler(CommandHandler("force_check", force_check))
     application.add_handler(CommandHandler("clean_db", clean_db_cmd))
     application.add_handler(CommandHandler("stats", stats_cmd))
     application.add_handler(CommandHandler("help", help_cmd))
     application.add_handler(CommandHandler("db_list", db_list_cmd))
     application.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
-    
+
+    # Фоновая задача проверки новинок
+    async def check_loop():
+        while True:
+            try:
+                await check_and_notify()
+            except Exception as e:
+                logger.error(f'Ошибка в цикле проверки: {e}', exc_info=True)
+            await asyncio.sleep(CHECK_INTERVAL)
+
+    # Запускаем фоновую задачу
+    asyncio.create_task(check_loop())
+
     logger.info("Бот запущен и готов к работе")
     await application.run_polling(allowed_updates=[])
-
-async def run_bot():
-    try:
-        check_task = asyncio.create_task(start_check_loop())
-        bot_task = asyncio.create_task(main_async())
-        await asyncio.gather(check_task, bot_task)
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-        raise
 
 def main():
     init_db()
     import nest_asyncio
     nest_asyncio.apply()
-    asyncio.run(run_bot())
+    asyncio.run(main_async())
 
 if __name__ == '__main__':
     main()
