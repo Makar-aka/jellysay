@@ -184,7 +184,7 @@ def get_new_items():
         response.raise_for_status()
         items = response.json()
         logger.info(f"Получено {len(items)} элементов из Jellyfin")
-
+        logger.info(f"Полученные данные: {json.dumps(items, indent=2, ensure_ascii=False)}")
         full_items = []
         for item in items:
             item_id = item['Id']
@@ -363,7 +363,7 @@ async def check_and_notify():
     # 2. Группируем по сериалу и сезону
     episode_groups = group_episodes(episodes_to_group)
     processed += sum(len(g[2]) for g in episode_groups)
-
+    logger.info(f"Группы эпизодов: {episode_groups}")
     # 3. Отправляем уведомления по группам эпизодов
     for series_name, season, episode_numbers, items in episode_groups:
         poster_url = get_poster_url(items[-1]['Id'])
