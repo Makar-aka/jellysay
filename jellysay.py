@@ -22,16 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Предотвращаем дублирование логов
-logger.propagate = False
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(message)s",
-        "%Y-%m-%d %H:%M:%S"
-    ))
-    logger.addHandler(handler)
-
 # Отключаем логи от python-telegram-bot
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.WARNING)
