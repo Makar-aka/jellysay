@@ -277,4 +277,4 @@ def announce_new_releases_from_jellyfin():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3535)
+    app.run(host="192.168.25.9", port=3535)
