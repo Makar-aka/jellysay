@@ -62,25 +62,30 @@ def init_db():
         if is_new_db:
             logger.info(f"Создан новый файл базы данных: {DB_FILE}")
         
-        # Проверяем текущую структуру таблицы
-        c.execute("PRAGMA table_info(sent_items)")
-        columns = {col[1] for col in c.fetchall()}
+        # Проверяем существование таблицы
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_items'")
+        table_exists = c.fetchone() is not None
         
-        # Создаем таблицу, если её нет
-        if 'sent_items' not in {table[0] for table in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}:
+        if not table_exists:
+            # Создаем новую таблицу
             c.execute('''
                 CREATE TABLE sent_items (
                     item_id TEXT PRIMARY KEY,
-                    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sent_at TIMESTAMP,
                     item_name TEXT,
                     item_type TEXT
                 )
             ''')
             logger.info("Создана новая таблица sent_items")
         else:
-            # Добавляем недостающие колонки
+            # Проверяем и добавляем недостающие колонки
+            c.execute("PRAGMA table_info(sent_items)")
+            columns = {col[1] for col in c.fetchall()}
+            
             if 'sent_at' not in columns:
-                c.execute('ALTER TABLE sent_items ADD COLUMN sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                c.execute('ALTER TABLE sent_items ADD COLUMN sent_at TIMESTAMP')
+                # Обновляем существующие записи текущей датой
+                c.execute("UPDATE sent_items SET sent_at = CURRENT_TIMESTAMP WHERE sent_at IS NULL")
                 logger.info("Добавлена колонка sent_at")
             
             if 'item_name' not in columns:
@@ -103,11 +108,13 @@ def mark_as_sent(item_id, item_name="", item_type=""):
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
         try:
             # Пробуем вставить запись с новыми полями
             c.execute(
-                'INSERT OR IGNORE INTO sent_items (item_id, item_name, item_type) VALUES (?, ?, ?)',
-                (item_id, item_name, item_type)
+                'INSERT OR IGNORE INTO sent_items (item_id, sent_at, item_name, item_type) VALUES (?, ?, ?, ?)',
+                (item_id, current_time, item_name, item_type)
             )
         except sqlite3.OperationalError as e:
             logger.warning(f"Ошибка при добавлении записи: {e}")
