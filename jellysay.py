@@ -165,7 +165,7 @@ def announce_new_releases_from_jellyfin():
 
                 notification_message = (
                     f"*🍿New Movie Added🍿*\n\n*{movie_name_cleaned}* *({release_year})*\n\n{overview}\n\n"
-                    f"Runtime\n{runtime}")
+                    f"Длительность\n{runtime}")
 
                 if trailer_url:
                     notification_message += f"\n\n[🎥]({trailer_url})[Trailer]({trailer_url})"
@@ -277,4 +277,4 @@ def announce_new_releases_from_jellyfin():
 
 
 if __name__ == "__main__":
-    app.run(host="192.168.25.9", port=3535)
+    app.run(host="0.0.0.0", port=3535)
