@@ -13,7 +13,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Set up logging
-log_directory = 'app/log'
+log_directory = '/app/log'
 log_filename = os.path.join(log_directory, 'jellysay.log')
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
