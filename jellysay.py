@@ -122,24 +122,25 @@ def mark_as_sent(item_id, item_name="", item_type=""):
         c = conn.cursor()
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        try:
-            # Пробуем вставить запись с новыми полями
-            c.execute(
-                'INSERT OR IGNORE INTO sent_items (item_id, sent_at, item_name, item_type) VALUES (?, ?, ?, ?)',
-                (item_id, current_time, item_name, item_type)
-            )
-        except sqlite3.OperationalError as e:
-            logger.warning(f"Ошибка при добавлении записи: {e}")
-            # Если возникла ошибка, используем старый формат
-            c.execute('INSERT OR IGNORE INTO sent_items (item_id) VALUES (?)', (item_id,))
-            logger.warning("Использован старый формат записи в базу данных")
+        # Проверяем существование записи
+        c.execute('SELECT 1 FROM sent_items WHERE item_id = ?', (item_id,))
+        exists = c.fetchone() is not None
         
-        conn.commit()
+        if not exists:
+            try:
+                c.execute(
+                    'INSERT INTO sent_items (item_id, sent_at, item_name, item_type) VALUES (?, ?, ?, ?)',
+                    (item_id, current_time, item_name, item_type)
+                )
+                conn.commit()
+                logger.info(f"Добавлен элемент: {item_name} ({item_type})")
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Ошибка при добавлении записи: {e}")
+                c.execute('INSERT INTO sent_items (item_id) VALUES (?)', (item_id,))
+                conn.commit()
+                logger.warning("Использован старый формат записи в базу данных")
+        
         conn.close()
-        
-        # Логируем только если реально была добавлена запись
-        if c.rowcount > 0:
-            logger.info(f"Добавлен элемент: {item_name} ({item_type})")
     except Exception as e:
         logger.error(f"Ошибка при работе с базой данных: {e}", exc_info=True)
         raise
@@ -279,57 +280,58 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
             message_count = 0
             last_message_time = datetime.now()
     
-    # Задержка между сообщениями
     await asyncio.sleep(MESSAGE_DELAY)
     
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto'
     try:
+        # Получаем изображение
         photo_response = requests.get(photo_url)
         if photo_response.status_code != 200:
             logger.error(f"Ошибка получения изображения: {photo_response.status_code}")
             return False
             
-        files = {
-            'photo': ('poster.jpg', photo_response.content)
-        }
-        payload = {
+        # Отправляем сообщение
+        resp = requests.post(url, data={
             'chat_id': target_chat_id,
             'caption': caption,
             'parse_mode': 'HTML'
-        }
+        }, files={
+            'photo': ('poster.jpg', photo_response.content)
+        })
         
-        resp = requests.post(url, data=payload, files=files)
         if resp.status_code == 200:
             message_count += 1
-            logger.info(f"Сообщение отправлено в Telegram (всего: {message_count})")
+            logger.info(f"Отправлено сообщение (#{message_count})")
             return True
         else:
             logger.error(f"Ошибка отправки в Telegram: {resp.status_code}. Ответ: {resp.text}")
             return False
+            
     except Exception as e:
         logger.error(f"Ошибка отправки в Telegram: {str(e)}", exc_info=True)
         return False
 
 async def check_and_notify():
-    logger.info("Начало проверки новых элементов")
     items = get_new_items()
+    if not items:
+        return 0, 0
+        
     processed = 0
     sent = 0
     
     for item in items:
         processed += 1
         item_id = item['Id']
-        already_sent = is_sent(item_id)
-        recent = is_recent(item, NEW_ITEMS_INTERVAL_HOURS)
         
-        if not already_sent and recent:
+        if not is_sent(item_id) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
             poster_url = get_poster_url(item_id)
             message, name, item_type = build_message(item)
             if await send_telegram_photo(poster_url, message):
                 mark_as_sent(item_id, name, item_type)
                 sent += 1
     
-    logger.info(f"Проверка завершена. Обработано: {processed}, Отправлено: {sent}")
+    if processed > 0:
+        logger.info(f"Проверка завершена. Обработано: {processed}, Отправлено: {sent}")
     return processed, sent
 
 async def db_list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
