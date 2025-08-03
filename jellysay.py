@@ -369,11 +369,11 @@ async def check_and_notify():
     processed += sum(len(g[2]) for g in episode_groups)
 
     # 3. Отправляем уведомления по группам эпизодов
-    for series_name, season, episode_numbers, sample_item in episode_groups:
+    for series_name, season, episode_list, sample_item in episode_groups:
         poster_url = get_poster_url(sample_item['Id'])
-        message = build_series_message(series_name, season, episode_numbers, sample_item)
+        message = build_series_message(series_name, season, episode_list, sample_item)
         if await send_telegram_photo(poster_url, message):
-            for ep_num in episode_numbers:
+            for ep_num, _ in episode_list:
                 mark_as_sent(f"{sample_item['SeriesId']}_S{season}E{ep_num}", series_name, 'Episode')
             sent += 1
 
