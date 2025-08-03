@@ -136,7 +136,10 @@ def mark_as_sent(item_id, item_name="", item_type=""):
         
         conn.commit()
         conn.close()
-        logger.info(f"Элемент {item_id} ({item_name}) добавлен в базу")
+        
+        # Логируем только если реально была добавлена запись
+        if c.rowcount > 0:
+            logger.info(f"Добавлен элемент: {item_name} ({item_type})")
     except Exception as e:
         logger.error(f"Ошибка при работе с базой данных: {e}", exc_info=True)
         raise
@@ -260,14 +263,12 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
     global message_count, last_message_time
     
     target_chat_id = chat_id or TELEGRAM_CHAT_ID
-    logger.info(f"Подготовка к отправке сообщения в чат {target_chat_id}")
     
     # Проверяем ограничение по времени
     now = datetime.now()
     if (now - last_message_time).total_seconds() >= 60:
         message_count = 0
         last_message_time = now
-        logger.info(f"Сброс счетчика сообщений. Новый счетчик: {message_count}")
     
     # Если превышен лимит сообщений в минуту
     if message_count >= MAX_MESSAGES_PER_MINUTE:
@@ -279,12 +280,10 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
             last_message_time = datetime.now()
     
     # Задержка между сообщениями
-    logger.info(f"Ожидание {MESSAGE_DELAY} сек перед отправкой")
     await asyncio.sleep(MESSAGE_DELAY)
     
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto'
     try:
-        logger.info(f"Загрузка изображения: {photo_url}")
         photo_response = requests.get(photo_url)
         if photo_response.status_code != 200:
             logger.error(f"Ошибка получения изображения: {photo_response.status_code}")
@@ -299,11 +298,10 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
             'parse_mode': 'HTML'
         }
         
-        logger.info("Отправка сообщения в Telegram")
         resp = requests.post(url, data=payload, files=files)
         if resp.status_code == 200:
             message_count += 1
-            logger.info(f"Сообщение успешно отправлено. Счетчик сообщений: {message_count}")
+            logger.info(f"Сообщение отправлено в Telegram (всего: {message_count})")
             return True
         else:
             logger.error(f"Ошибка отправки в Telegram: {resp.status_code}. Ответ: {resp.text}")
