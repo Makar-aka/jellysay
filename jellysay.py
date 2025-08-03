@@ -5,6 +5,7 @@ import os
 import sqlite3
 import asyncio
 import logging
+import logging.handlers
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -20,6 +21,21 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+
+# Предотвращаем дублирование логов
+logger.propagate = False
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        "%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(handler)
+
+# Отключаем логи от python-telegram-bot
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('telegram').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
 
 # Константы для защиты от спама
 MESSAGE_DELAY = 3  # Задержка между сообщениями в секундах
@@ -409,21 +425,32 @@ async def start_check_loop():
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def main_async():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).job_queue(None).build()
-    app.add_handler(CommandHandler("force_check", force_check))
-    app.add_handler(CommandHandler("clean_db", clean_db_cmd))
-    app.add_handler(CommandHandler("stats", stats_cmd))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("db_list", db_list_cmd))
-    app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
+    # Отключаем встроенные логи Application
+    application = (ApplicationBuilder()
+                  .token(TELEGRAM_BOT_TOKEN)
+                  .job_queue(None)
+                  .write_timeout(30)
+                  .read_timeout(30)
+                  .build())
+    
+    application.add_handler(CommandHandler("force_check", force_check))
+    application.add_handler(CommandHandler("clean_db", clean_db_cmd))
+    application.add_handler(CommandHandler("stats", stats_cmd))
+    application.add_handler(CommandHandler("help", help_cmd))
+    application.add_handler(CommandHandler("db_list", db_list_cmd))
+    application.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
     
     logger.info("Бот запущен и готов к работе")
-    await app.run_polling()
+    await application.run_polling(allowed_updates=[])
 
 async def run_bot():
-    check_task = asyncio.create_task(start_check_loop())
-    bot_task = asyncio.create_task(main_async())
-    await asyncio.gather(check_task, bot_task)
+    try:
+        check_task = asyncio.create_task(start_check_loop())
+        bot_task = asyncio.create_task(main_async())
+        await asyncio.gather(check_task, bot_task)
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        raise
 
 def main():
     init_db()
