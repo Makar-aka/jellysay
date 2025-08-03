@@ -7,7 +7,7 @@ WORKDIR /app
 # Копируем файлы приложения
 COPY jellysay.py /app/
 COPY requirements.txt /app/
-COPY .env.example /app/.env
+COPY .env /app/.env
 
 # Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
