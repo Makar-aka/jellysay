@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
-
+print("Logger handlers:", logger.handlers)
 # Константы для защиты от спама
 MESSAGE_DELAY = 3  # Задержка между сообщениями в секундах
 MAX_MESSAGES_PER_MINUTE = 20  # Максимум сообщений в минуту
