@@ -212,7 +212,7 @@ def get_poster_url(item_id):
 def group_episodes(items):
     """
     Группирует новые эпизоды по сериалу и сезону.
-    Возвращает список: [(series_name, season_number, [episode_numbers], episode_sample), ...]
+    Возвращает список: [(series_name, season_number, [(ep_number, ep_name)], episode_sample), ...]
     """
     episodes = {}
     for item in items:
@@ -220,14 +220,15 @@ def group_episodes(items):
             series_name = item.get('SeriesName', item.get('Name', 'Без названия'))
             season = item.get('ParentIndexNumber', 0)
             episode = item.get('IndexNumber', 0)
+            ep_name = item.get('Name', '')
             key = (series_name, season)
             if key not in episodes:
-                episodes[key] = {'numbers': [], 'sample': item}
-            episodes[key]['numbers'].append(episode)
-    # Сортировка номеров серий
+                episodes[key] = {'list': [], 'sample': item}
+            episodes[key]['list'].append((episode, ep_name))
+    # Сортировка по номеру серии
     for v in episodes.values():
-        v['numbers'].sort()
-    return [(k[0], k[1], v['numbers'], v['sample']) for k, v in episodes.items()]
+        v['list'].sort(key=lambda x: x[0])
+    return [(k[0], k[1], v['list'], v['sample']) for k, v in episodes.items()]
 
 def build_message(item):
     item_type = item.get('Type', 'Unknown')
@@ -262,24 +263,24 @@ def build_message(item):
     )
     return message, name, content_type
 
-def build_series_message(series_name, season, episode_numbers, sample_item):
+def build_series_message(series_name, season, episode_list, sample_item):
     content_type = 'Сериал'
     year = sample_item.get('ProductionYear', '—')
     genres = ', '.join(sample_item.get('Genres', [])) if sample_item.get('Genres') else '—'
     date_added = sample_item.get('DateCreated', '')[:10] if sample_item.get('DateCreated') else '—'
     overview = sample_item.get('Overview', 'Нет описания')
-    episodes_str = ','.join(str(num) for num in episode_numbers)
+    # Формируем строку: 7 (название), 8 (название)
+    episodes_str = ', '.join(f"{num} ({name})" if name else f"{num}" for num, name in episode_list)
     message = (
         f"<b>{series_name}</b>\n"
         f"<b>Тип:</b> {content_type}\n"
         f"<b>Год:</b> {year}\n"
         f"<b>Жанр:</b> {genres}\n"
         f"<b>Добавлено:</b> {date_added}\n"
-        f"<b>Сезон:</b> {season} <b>серия:</b> {episodes_str}\n\n"
+        f"<b>Сезон:</b> {season} <b>серии:</b> {episodes_str}\n\n"
         f"{overview}"
     )
     return message
-
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
     if not date_str:
