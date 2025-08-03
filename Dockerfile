@@ -1,20 +1,22 @@
-FROM python:3.12-slim
+# Используем базовый образ Python
+FROM python:3.10-slim
 
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Установка зависимостей
-COPY requirements.txt .
+# Копируем файлы приложения
+COPY jellysay.py /app/
+COPY requirements.txt /app/
+COPY .env.example /app/.env
+
+# Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN mkdir -p /app/data
+# Создаём директории для логов и данных
+RUN mkdir -p /app/log /app/data
 
-# Копирование файлов проекта
-COPY jellysay.py .
+# Указываем порт, который будет прослушивать приложение
+EXPOSE 3535
 
-# Создание volume для базы данных
-VOLUME /app/data
-
-# Установка переменных окружения напрямую
-ENV DB_FILE=/app/data/sent_items.db
-
+# Запускаем приложение
 CMD ["python", "jellysay.py"]
