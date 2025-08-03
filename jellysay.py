@@ -352,14 +352,13 @@ async def check_and_notify():
     processed = 0
     sent = 0
 
-    # 1. Группируем только НЕотправленные эпизоды
+    # 1. Собираем только новые (неотправленные) эпизоды
     episodes_to_group = []
     for item in items:
         if item.get('Type') == 'Episode':
             season = item.get('ParentIndexNumber', 0)
             episode = item.get('IndexNumber', 0)
             series_id = item.get('SeriesId')
-            # Формируем уникальный id для серии
             episode_id = f"{series_id}_S{season}E{episode}"
             if not is_sent(episode_id) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
                 episodes_to_group.append(item)
