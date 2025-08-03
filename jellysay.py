@@ -41,39 +41,86 @@ NEW_ITEMS_INTERVAL_HOURS = int(os.getenv('NEW_ITEMS_INTERVAL_HOURS', 24))
 DB_FILE = os.getenv('DB_FILE', 'sent_items.db')
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    # Добавляем колонку sent_at для отслеживания времени отправки
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS sent_items (
-            item_id TEXT PRIMARY KEY,
-            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            item_name TEXT,
-            item_type TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-    logger.info("База данных инициализирована")
-
-def is_sent(item_id):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('SELECT 1 FROM sent_items WHERE item_id = ?', (item_id,))
-    result = c.fetchone()
-    conn.close()
-    return result is not None
+    # Создаем директорию для базы данных, если её нет
+    db_dir = os.path.dirname(DB_FILE)
+    if db_dir and not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir)
+            logger.info(f"Создана директория для базы данных: {db_dir}")
+        except Exception as e:
+            logger.error(f"Ошибка создания директории для базы данных: {e}", exc_info=True)
+            raise
+    
+    # Проверяем, существует ли файл базы данных
+    is_new_db = not os.path.exists(DB_FILE)
+    
+    # Подключаемся к базе данных (создаст файл, если его нет)
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        
+        if is_new_db:
+            logger.info(f"Создан новый файл базы данных: {DB_FILE}")
+        
+        # Проверяем текущую структуру таблицы
+        c.execute("PRAGMA table_info(sent_items)")
+        columns = {col[1] for col in c.fetchall()}
+        
+        # Создаем таблицу, если её нет
+        if 'sent_items' not in {table[0] for table in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}:
+            c.execute('''
+                CREATE TABLE sent_items (
+                    item_id TEXT PRIMARY KEY,
+                    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    item_name TEXT,
+                    item_type TEXT
+                )
+            ''')
+            logger.info("Создана новая таблица sent_items")
+        else:
+            # Добавляем недостающие колонки
+            if 'sent_at' not in columns:
+                c.execute('ALTER TABLE sent_items ADD COLUMN sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+                logger.info("Добавлена колонка sent_at")
+            
+            if 'item_name' not in columns:
+                c.execute('ALTER TABLE sent_items ADD COLUMN item_name TEXT')
+                logger.info("Добавлена колонка item_name")
+                
+            if 'item_type' not in columns:
+                c.execute('ALTER TABLE sent_items ADD COLUMN item_type TEXT')
+                logger.info("Добавлена колонка item_type")
+        
+        conn.commit()
+        conn.close()
+        logger.info("База данных успешно инициализирована")
+        
+    except Exception as e:
+        logger.error(f"Ошибка инициализации базы данных: {e}", exc_info=True)
+        raise
 
 def mark_as_sent(item_id, item_name="", item_type=""):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        'INSERT OR IGNORE INTO sent_items (item_id, item_name, item_type) VALUES (?, ?, ?)',
-        (item_id, item_name, item_type)
-    )
-    conn.commit()
-    conn.close()
-    logger.info(f"Элемент {item_id} ({item_name}) добавлен в базу")
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        try:
+            # Пробуем вставить запись с новыми полями
+            c.execute(
+                'INSERT OR IGNORE INTO sent_items (item_id, item_name, item_type) VALUES (?, ?, ?)',
+                (item_id, item_name, item_type)
+            )
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Ошибка при добавлении записи: {e}")
+            # Если возникла ошибка, используем старый формат
+            c.execute('INSERT OR IGNORE INTO sent_items (item_id) VALUES (?)', (item_id,))
+            logger.warning("Использован старый формат записи в базу данных")
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"Элемент {item_id} ({item_name}) добавлен в базу")
+    except Exception as e:
+        logger.error(f"Ошибка при работе с базой данных: {e}", exc_info=True)
+        raise
 
 def get_db_records(limit=100, offset=0):
     conn = sqlite3.connect(DB_FILE)
