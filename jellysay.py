@@ -165,7 +165,7 @@ def announce_new_releases_from_jellyfin():
 
                 notification_message = (
                     f"*🍿New Movie Added🍿*\n\n*{movie_name_cleaned}* *({release_year})*\n\n{overview}\n\n"
-                    f"Длительность\n{runtime}")
+                    f"Runtime\n{runtime}")
 
                 if trailer_url:
                     notification_message += f"\n\n[🎥]({trailer_url})[Trailer]({trailer_url})"
