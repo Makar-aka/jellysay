@@ -173,7 +173,7 @@ def get_new_items():
     logger.info("Запрос новых элементов из Jellyfin")
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
     params = {
-        'Limit': 20, 
+        'Limit': 40, 
         'userId': JELLYFIN_USER_ID,
         'Fields': 'DateCreated,DateLastMediaAdded,PremiereDate'
     }
@@ -364,6 +364,7 @@ async def check_and_notify():
     episode_groups = group_episodes(episodes_to_group)
     processed += sum(len(g[2]) for g in episode_groups)
     logger.info(f"Группы эпизодов: {episode_groups}")
+
     # 3. Отправляем уведомления по группам эпизодов
     for series_name, season, episode_numbers, items in episode_groups:
         poster_url = get_poster_url(items[-1]['Id'])
@@ -374,6 +375,20 @@ async def check_and_notify():
                 episode_id = f"{ep_item['SeriesId']}_S{season}E{ep_num}"
                 mark_as_sent(episode_id, ep_item.get('Name', ''), 'Episode')
             sent += 1
+
+    # 4. Обрабатываем остальные типы (фильмы, новые сериалы)
+    for item in items:
+        if item.get('Type') != 'Episode' and not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
+            poster_url = get_poster_url(item['Id'])
+            message, name, item_type = build_message(item)
+            if await send_telegram_photo(poster_url, message):
+                mark_as_sent(item['Id'], name, item_type)
+                sent += 1
+            processed += 1
+
+    if processed > 0:
+        logger.info(f"Проверка завершена. Обработано: {processed}, Отправлено: {sent}")
+    return processed, sent
 
     # 4. Обрабатываем остальные типы (фильмы, новые сериалы)
     for item in items:
