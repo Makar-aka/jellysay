@@ -4,14 +4,6 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import requests
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger()
-
 # Загрузка переменных окружения
 load_dotenv()
 
@@ -19,6 +11,29 @@ JELLYFIN_URL = os.getenv('JELLYFIN_URL')
 JELLYFIN_API_KEY = os.getenv('JELLYFIN_API_KEY')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+
+# Настройки логирования
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO').upper()
+LOG_FILE = os.getenv('LOG_FILE', '')
+
+if LOG_FILE:
+    logging.basicConfig(
+        level=getattr(logging, LOG_LEVEL, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(LOG_FILE),
+            logging.StreamHandler()
+        ]
+    )
+else:
+    logging.basicConfig(
+        level=getattr(logging, LOG_LEVEL, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+logger = logging.getLogger()
 
 # Flask приложение
 app = Flask(__name__)
