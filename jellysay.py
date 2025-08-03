@@ -376,8 +376,9 @@ async def check_and_notify():
             for ep_num, ep_name in episode_list:
                 episode_id = f"{sample_item['SeriesId']}_S{season}E{ep_num}"
                 mark_as_sent(episode_id, ep_name, 'Episode')
+                logger.info(f"mark_as_sent: {episode_id}, {ep_name}, Episode")
             sent += 1
-    logger.info(f"mark_as_sent: {episode_id}, {ep_name}, Episode")
+ 
     # 4. Обрабатываем остальные типы (фильмы, новые сериалы)
     for item in items:
         if item.get('Type') != 'Episode' and not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
