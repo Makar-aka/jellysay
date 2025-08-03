@@ -5,7 +5,6 @@ import os
 import sqlite3
 import asyncio
 import logging
-import logging.handlers
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -20,13 +19,12 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 
-# Отключаем логи от python-telegram-bot
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
-print("Logger handlers:", logger.handlers)
+
 # Константы для защиты от спама
 MESSAGE_DELAY = 3  # Задержка между сообщениями в секундах
 MAX_MESSAGES_PER_MINUTE = 20  # Максимум сообщений в минуту
@@ -56,22 +54,22 @@ def init_db():
         except Exception as e:
             logger.error(f"Ошибка создания директории для базы данных: {e}", exc_info=True)
             raise
-    
+
     # Проверяем, существует ли файл базы данных
     is_new_db = not os.path.exists(DB_FILE)
-    
+
     # Подключаемся к базе данных (создаст файл, если его нет)
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        
+
         if is_new_db:
             logger.info(f"Создан новый файл базы данных: {DB_FILE}")
-        
+
         # Проверяем существование таблицы
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_items'")
         table_exists = c.fetchone() is not None
-        
+
         if not table_exists:
             # Создаем новую таблицу
             c.execute('''
@@ -87,25 +85,24 @@ def init_db():
             # Проверяем и добавляем недостающие колонки
             c.execute("PRAGMA table_info(sent_items)")
             columns = {col[1] for col in c.fetchall()}
-            
+
             if 'sent_at' not in columns:
                 c.execute('ALTER TABLE sent_items ADD COLUMN sent_at TIMESTAMP')
-                # Обновляем существующие записи текущей датой
                 c.execute("UPDATE sent_items SET sent_at = CURRENT_TIMESTAMP WHERE sent_at IS NULL")
                 logger.info("Добавлена колонка sent_at")
-            
+
             if 'item_name' not in columns:
                 c.execute('ALTER TABLE sent_items ADD COLUMN item_name TEXT')
                 logger.info("Добавлена колонка item_name")
-                
+
             if 'item_type' not in columns:
                 c.execute('ALTER TABLE sent_items ADD COLUMN item_type TEXT')
                 logger.info("Добавлена колонка item_type")
-        
+
         conn.commit()
         conn.close()
         logger.info("База данных успешно инициализирована")
-        
+
     except Exception as e:
         logger.error(f"Ошибка инициализации базы данных: {e}", exc_info=True)
         raise
@@ -127,11 +124,10 @@ def mark_as_sent(item_id, item_name="", item_type=""):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Проверяем существование записи
+
         c.execute('SELECT 1 FROM sent_items WHERE item_id = ?', (item_id,))
         exists = c.fetchone() is not None
-        
+
         if not exists:
             try:
                 c.execute(
@@ -145,7 +141,7 @@ def mark_as_sent(item_id, item_name="", item_type=""):
                 c.execute('INSERT INTO sent_items (item_id) VALUES (?)', (item_id,))
                 conn.commit()
                 logger.warning("Использован старый формат записи в базу данных")
-        
+
         conn.close()
     except Exception as e:
         logger.error(f"Ошибка при работе с базой данных: {e}", exc_info=True)
@@ -189,14 +185,13 @@ def get_new_items():
         'Fields': 'DateCreated,DateLastMediaAdded,PremiereDate'
     }
     url = f'{JELLYFIN_URL}/Items/Latest'
-    
+
     try:
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         items = response.json()
         logger.info(f"Получено {len(items)} элементов из Jellyfin")
-        
-        # Получаем полную информацию для каждого элемента
+
         full_items = []
         for item in items:
             item_id = item['Id']
@@ -205,7 +200,7 @@ def get_new_items():
             if item_response.status_code == 200:
                 full_item = item_response.json()
                 full_items.append(full_item)
-        
+
         return full_items
     except Exception as e:
         logger.error(f"Ошибка Jellyfin API: {e}", exc_info=True)
@@ -252,12 +247,10 @@ def is_recent(item, interval_hours):
     if not date_str:
         return False
     try:
-        # Обрезаем до формата 2025-07-21T11:21:02
         if '.' in date_str:
             date_str = date_str.split('.')[0]
         date_str = date_str.replace('Z', '')
-        
-        # Создаем aware datetime (с UTC зоной)
+
         dt = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         delta = now - dt
@@ -268,16 +261,14 @@ def is_recent(item, interval_hours):
 
 async def send_telegram_photo(photo_url, caption, chat_id=None):
     global message_count, last_message_time
-    
+
     target_chat_id = chat_id or TELEGRAM_CHAT_ID
-    
-    # Проверяем ограничение по времени
+
     now = datetime.now()
     if (now - last_message_time).total_seconds() >= 60:
         message_count = 0
         last_message_time = now
-    
-    # Если превышен лимит сообщений в минуту
+
     if message_count >= MAX_MESSAGES_PER_MINUTE:
         wait_time = 60 - (now - last_message_time).total_seconds()
         if wait_time > 0:
@@ -285,18 +276,16 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
             await asyncio.sleep(wait_time)
             message_count = 0
             last_message_time = datetime.now()
-    
+
     await asyncio.sleep(MESSAGE_DELAY)
-    
+
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto'
     try:
-        # Получаем изображение
         photo_response = requests.get(photo_url)
         if photo_response.status_code != 200:
             logger.error(f"Ошибка получения изображения: {photo_response.status_code}")
             return False
-            
-        # Отправляем сообщение
+
         resp = requests.post(url, data={
             'chat_id': target_chat_id,
             'caption': caption,
@@ -304,7 +293,7 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
         }, files={
             'photo': ('poster.jpg', photo_response.content)
         })
-        
+
         if resp.status_code == 200:
             message_count += 1
             logger.info(f"Отправлено сообщение (#{message_count})")
@@ -312,7 +301,7 @@ async def send_telegram_photo(photo_url, caption, chat_id=None):
         else:
             logger.error(f"Ошибка отправки в Telegram: {resp.status_code}. Ответ: {resp.text}")
             return False
-            
+
     except Exception as e:
         logger.error(f"Ошибка отправки в Telegram: {str(e)}", exc_info=True)
         return False
@@ -321,21 +310,21 @@ async def check_and_notify():
     items = get_new_items()
     if not items:
         return 0, 0
-        
+
     processed = 0
     sent = 0
-    
+
     for item in items:
         processed += 1
         item_id = item['Id']
-        
+
         if not is_sent(item_id) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
             poster_url = get_poster_url(item_id)
             message, name, item_type = build_message(item)
             if await send_telegram_photo(poster_url, message):
                 mark_as_sent(item_id, name, item_type)
                 sent += 1
-    
+
     if processed > 0:
         logger.info(f"Проверка завершена. Обработано: {processed}, Отправлено: {sent}")
     return processed, sent
@@ -343,30 +332,30 @@ async def check_and_notify():
 async def db_list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
-    
+
     page = 1
     if context.args and context.args[0].isdigit():
         page = int(context.args[0])
-    
+
     per_page = 10
     offset = (page - 1) * per_page
-    
+
     records = get_db_records(per_page, offset)
     if not records:
         await update.message.reply_text("База данных пуста или достигнут конец списка")
         return
-        
+
     total = count_db()
     total_pages = (total + per_page - 1) // per_page
-    
+
     message = f"<b>Записи в базе данных (страница {page}/{total_pages}):</b>\n\n"
     for i, (item_id, sent_at, name, type_) in enumerate(records, offset + 1):
         sent_date = datetime.fromisoformat(sent_at).strftime("%Y-%m-%d %H:%M:%S")
         message += f"{i}. {name} ({type_})\n⌚️ {sent_date}\n🆔 {item_id}\n\n"
-    
+
     if page < total_pages:
         message += f"\nСледующая страница: /db_list {page + 1}"
-    
+
     await update.message.reply_text(message, parse_mode="HTML")
 
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -406,14 +395,6 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text, parse_mode="HTML")
 
-async def start_check_loop():
-    while True:
-        try:
-            await check_and_notify()
-        except Exception as e:
-            logger.error(f'Ошибка в цикле проверки: {e}', exc_info=True)
-        await asyncio.sleep(CHECK_INTERVAL)
-
 async def main_async():
     application = (ApplicationBuilder()
                   .token(TELEGRAM_BOT_TOKEN)
@@ -438,7 +419,6 @@ async def main_async():
                 logger.error(f'Ошибка в цикле проверки: {e}', exc_info=True)
             await asyncio.sleep(CHECK_INTERVAL)
 
-    # Запускаем фоновую задачу
     asyncio.create_task(check_loop())
 
     logger.info("Бот запущен и готов к работе")
