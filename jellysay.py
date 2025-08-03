@@ -352,11 +352,23 @@ async def check_and_notify():
     processed = 0
     sent = 0
 
-    # Группируем эпизоды
-    episode_groups = group_episodes(items)
+    # 1. Группируем только НЕотправленные эпизоды
+    episodes_to_group = []
+    for item in items:
+        if item.get('Type') == 'Episode':
+            season = item.get('ParentIndexNumber', 0)
+            episode = item.get('IndexNumber', 0)
+            series_id = item.get('SeriesId')
+            # Формируем уникальный id для серии
+            episode_id = f"{series_id}_S{season}E{episode}"
+            if not is_sent(episode_id) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
+                episodes_to_group.append(item)
+
+    # 2. Группируем по сериалу и сезону
+    episode_groups = group_episodes(episodes_to_group)
     processed += sum(len(g[2]) for g in episode_groups)
 
-    # Отправляем уведомления по группам эпизодов
+    # 3. Отправляем уведомления по группам эпизодов
     for series_name, season, episode_numbers, sample_item in episode_groups:
         poster_url = get_poster_url(sample_item['Id'])
         message = build_series_message(series_name, season, episode_numbers, sample_item)
@@ -365,7 +377,7 @@ async def check_and_notify():
                 mark_as_sent(f"{sample_item['SeriesId']}_S{season}E{ep_num}", series_name, 'Episode')
             sent += 1
 
-    # Обрабатываем остальные типы (фильмы, новые сериалы)
+    # 4. Обрабатываем остальные типы (фильмы, новые сериалы)
     for item in items:
         if item.get('Type') != 'Episode' and not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
             poster_url = get_poster_url(item['Id'])
