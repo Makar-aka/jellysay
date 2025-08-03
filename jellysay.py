@@ -176,6 +176,7 @@ def get_new_items():
         'Limit': 40, 
         'userId': JELLYFIN_USER_ID,
         'Fields': 'DateCreated,DateLastMediaAdded,PremiereDate'
+        'IncludeItemTypes': 'Episode'  # Фильтруем только эпизоды
     }
     url = f'{JELLYFIN_URL}/Items/Latest'
 
