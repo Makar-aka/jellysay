@@ -16,8 +16,10 @@ from telegram.ext import (
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
 )
+logger = logging.getLogger(__name__)
 
 # Константы для защиты от спама
 MESSAGE_DELAY = 3  # Задержка между сообщениями в секундах
@@ -41,14 +43,18 @@ DB_FILE = os.getenv('DB_FILE', 'sent_items.db')
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # Добавляем колонку sent_at для отслеживания времени отправки
     c.execute('''
         CREATE TABLE IF NOT EXISTS sent_items (
-            item_id TEXT PRIMARY KEY
+            item_id TEXT PRIMARY KEY,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            item_name TEXT,
+            item_type TEXT
         )
     ''')
     conn.commit()
     conn.close()
-    logging.info("База данных инициализирована")
+    logger.info("База данных инициализирована")
 
 def is_sent(item_id):
     conn = sqlite3.connect(DB_FILE)
@@ -58,12 +64,29 @@ def is_sent(item_id):
     conn.close()
     return result is not None
 
-def mark_as_sent(item_id):
+def mark_as_sent(item_id, item_name="", item_type=""):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('INSERT OR IGNORE INTO sent_items (item_id) VALUES (?)', (item_id,))
+    c.execute(
+        'INSERT OR IGNORE INTO sent_items (item_id, item_name, item_type) VALUES (?, ?, ?)',
+        (item_id, item_name, item_type)
+    )
     conn.commit()
     conn.close()
+    logger.info(f"Элемент {item_id} ({item_name}) добавлен в базу")
+
+def get_db_records(limit=100, offset=0):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        SELECT item_id, sent_at, item_name, item_type 
+        FROM sent_items 
+        ORDER BY sent_at DESC 
+        LIMIT ? OFFSET ?
+    ''', (limit, offset))
+    records = c.fetchall()
+    conn.close()
+    return records
 
 def clean_db():
     conn = sqlite3.connect(DB_FILE)
@@ -71,7 +94,7 @@ def clean_db():
     c.execute('DELETE FROM sent_items')
     conn.commit()
     conn.close()
-    logging.info("База очищена")
+    logger.info("База очищена")
 
 def count_db():
     conn = sqlite3.connect(DB_FILE)
@@ -82,6 +105,7 @@ def count_db():
     return count
 
 def get_new_items():
+    logger.info("Запрос новых элементов из Jellyfin")
     headers = {'X-Emby-Token': JELLYFIN_API_KEY}
     params = {
         'Limit': 20, 
@@ -94,6 +118,7 @@ def get_new_items():
         response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         items = response.json()
+        logger.info(f"Получено {len(items)} элементов из Jellyfin")
         
         # Получаем полную информацию для каждого элемента
         full_items = []
@@ -107,7 +132,7 @@ def get_new_items():
         
         return full_items
     except Exception as e:
-        logging.error(f"Jellyfin API error: {e}")
+        logger.error(f"Ошибка Jellyfin API: {e}", exc_info=True)
         return []
 
 def get_poster_url(item_id):
@@ -144,7 +169,7 @@ def build_message(item):
         f"<b>Добавлено:</b> {date_added}\n\n"
         f"{overview}"
     )
-    return message
+    return message, name, content_type
 
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
@@ -162,72 +187,125 @@ def is_recent(item, interval_hours):
         delta = now - dt
         return delta <= timedelta(hours=interval_hours)
     except Exception as e:
-        logging.error(f"Ошибка разбора даты: {e}")
+        logger.error(f"Ошибка разбора даты: {e}", exc_info=True)
         return False
 
 async def send_telegram_photo(photo_url, caption, chat_id=None):
     global message_count, last_message_time
+    
+    target_chat_id = chat_id or TELEGRAM_CHAT_ID
+    logger.info(f"Подготовка к отправке сообщения в чат {target_chat_id}")
     
     # Проверяем ограничение по времени
     now = datetime.now()
     if (now - last_message_time).total_seconds() >= 60:
         message_count = 0
         last_message_time = now
+        logger.info(f"Сброс счетчика сообщений. Новый счетчик: {message_count}")
     
     # Если превышен лимит сообщений в минуту
     if message_count >= MAX_MESSAGES_PER_MINUTE:
         wait_time = 60 - (now - last_message_time).total_seconds()
         if wait_time > 0:
-            logging.info(f"Достигнут лимит сообщений, ожидание {wait_time:.1f} сек")
+            logger.warning(f"Достигнут лимит сообщений ({message_count}/{MAX_MESSAGES_PER_MINUTE}), ожидание {wait_time:.1f} сек")
             await asyncio.sleep(wait_time)
             message_count = 0
             last_message_time = datetime.now()
     
     # Задержка между сообщениями
+    logger.info(f"Ожидание {MESSAGE_DELAY} сек перед отправкой")
     await asyncio.sleep(MESSAGE_DELAY)
     
     url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto'
     try:
+        logger.info(f"Загрузка изображения: {photo_url}")
         photo_response = requests.get(photo_url)
         if photo_response.status_code != 200:
-            logging.error(f"Ошибка получения изображения: {photo_response.status_code}")
-            return
+            logger.error(f"Ошибка получения изображения: {photo_response.status_code}")
+            return False
             
         files = {
             'photo': ('poster.jpg', photo_response.content)
         }
         payload = {
-            'chat_id': chat_id or TELEGRAM_CHAT_ID,
+            'chat_id': target_chat_id,
             'caption': caption,
             'parse_mode': 'HTML'
         }
         
+        logger.info("Отправка сообщения в Telegram")
         resp = requests.post(url, data=payload, files=files)
         if resp.status_code == 200:
             message_count += 1
+            logger.info(f"Сообщение успешно отправлено. Счетчик сообщений: {message_count}")
+            return True
         else:
-            logging.error(f"Ошибка отправки в Telegram: {resp.status_code}")
+            logger.error(f"Ошибка отправки в Telegram: {resp.status_code}. Ответ: {resp.text}")
+            return False
     except Exception as e:
-        logging.error(f"Ошибка отправки в Telegram: {e}")
+        logger.error(f"Ошибка отправки в Telegram: {str(e)}", exc_info=True)
+        return False
 
 async def check_and_notify():
+    logger.info("Начало проверки новых элементов")
     items = get_new_items()
+    processed = 0
+    sent = 0
+    
     for item in items:
+        processed += 1
         item_id = item['Id']
         already_sent = is_sent(item_id)
         recent = is_recent(item, NEW_ITEMS_INTERVAL_HOURS)
         
         if not already_sent and recent:
             poster_url = get_poster_url(item_id)
-            message = build_message(item)
-            await send_telegram_photo(poster_url, message)
-            mark_as_sent(item_id)
+            message, name, item_type = build_message(item)
+            if await send_telegram_photo(poster_url, message):
+                mark_as_sent(item_id, name, item_type)
+                sent += 1
+    
+    logger.info(f"Проверка завершена. Обработано: {processed}, Отправлено: {sent}")
+    return processed, sent
+
+async def db_list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
+        return
+    
+    page = 1
+    if context.args and context.args[0].isdigit():
+        page = int(context.args[0])
+    
+    per_page = 10
+    offset = (page - 1) * per_page
+    
+    records = get_db_records(per_page, offset)
+    if not records:
+        await update.message.reply_text("База данных пуста или достигнут конец списка")
+        return
+        
+    total = count_db()
+    total_pages = (total + per_page - 1) // per_page
+    
+    message = f"<b>Записи в базе данных (страница {page}/{total_pages}):</b>\n\n"
+    for i, (item_id, sent_at, name, type_) in enumerate(records, offset + 1):
+        sent_date = datetime.fromisoformat(sent_at).strftime("%Y-%m-%d %H:%M:%S")
+        message += f"{i}. {name} ({type_})\n⌚️ {sent_date}\n🆔 {item_id}\n\n"
+    
+    if page < total_pages:
+        message += f"\nСледующая страница: /db_list {page + 1}"
+    
+    await update.message.reply_text(message, parse_mode="HTML")
 
 async def force_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
         return
-    await check_and_notify()
-    await update.message.reply_text("Проверка завершена")
+    processed, sent = await check_and_notify()
+    await update.message.reply_text(
+        f"Проверка завершена\n"
+        f"Обработано элементов: {processed}\n"
+        f"Отправлено уведомлений: {sent}"
+    )
 
 async def clean_db_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != TELEGRAM_ADMIN_ID or update.effective_chat.type != "private":
@@ -249,6 +327,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/force_check — вручную запустить проверку новинок\n"
         "/clean_db — очистить базу отправленных уведомлений\n"
         "/stats — показать количество записей в базе\n"
+        "/db_list [страница] — показать список всех записей в базе\n"
         "/help — показать это сообщение\n\n"
         "Бот реагирует только на команды администратора в личных сообщениях. "
         "Уведомления о новинках отправляются в группу."
@@ -260,7 +339,7 @@ async def start_check_loop():
         try:
             await check_and_notify()
         except Exception as e:
-            logging.error(f'Ошибка: {e}')
+            logger.error(f'Ошибка в цикле проверки: {e}', exc_info=True)
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def main_async():
@@ -269,7 +348,10 @@ async def main_async():
     app.add_handler(CommandHandler("clean_db", clean_db_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("db_list", db_list_cmd))
     app.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
+    
+    logger.info("Бот запущен и готов к работе")
     await app.run_polling()
 
 async def run_bot():
