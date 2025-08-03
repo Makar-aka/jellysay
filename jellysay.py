@@ -445,18 +445,54 @@ async def main_async():
 
 async def run_bot():
     try:
-        check_task = asyncio.create_task(start_check_loop())
-        bot_task = asyncio.create_task(main_async())
-        await asyncio.gather(check_task, bot_task)
+        # Запускаем бота, который будет периодически проверять новинки
+        application = (ApplicationBuilder()
+                     .token(TELEGRAM_BOT_TOKEN)
+                     .job_queue(None)
+                     .write_timeout(30)
+                     .read_timeout(30)
+                     .build())
+
+        # Добавляем обработчики команд
+        application.add_handler(CommandHandler("force_check", force_check))
+        application.add_handler(CommandHandler("clean_db", clean_db_cmd))
+        application.add_handler(CommandHandler("stats", stats_cmd))
+        application.add_handler(CommandHandler("help", help_cmd))
+        application.add_handler(CommandHandler("db_list", db_list_cmd))
+        application.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
+
+        # Создаем задачу для проверки новинок
+        async def check_loop():
+            while True:
+                try:
+                    await check_and_notify()
+                except Exception as e:
+                    logger.error(f'Ошибка в цикле проверки: {e}', exc_info=True)
+                await asyncio.sleep(CHECK_INTERVAL)
+
+        # Запускаем проверку новинок как фоновую задачу
+        application.loop.create_task(check_loop())
+        
+        logger.info("Бот запущен и готов к работе")
+        await application.run_polling(allowed_updates=[])
+        
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}", exc_info=True)
         raise
 
 def main():
-    init_db()
-    import nest_asyncio
-    nest_asyncio.apply()
-    asyncio.run(run_bot())
-
-if __name__ == '__main__':
-    main()
+    try:
+        # Инициализируем базу данных
+        init_db()
+        
+        # Применяем nest_asyncio для работы в Jupyter/IPython
+        import nest_asyncio
+        nest_asyncio.apply()
+        
+        # Запускаем бота
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен пользователем")
+    except Exception as e:
+        logger.error(f"Критическая ошибка при запуске: {e}", exc_info=True)
+        raise
