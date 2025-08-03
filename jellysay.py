@@ -25,9 +25,8 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 
-# Константы для защиты от спама
-MESSAGE_DELAY = 3  # Задержка между сообщениями в секундах
-MAX_MESSAGES_PER_MINUTE = 20  # Максимум сообщений в минуту
+MESSAGE_DELAY = 3
+MAX_MESSAGES_PER_MINUTE = 20
 message_count = 0
 last_message_time = datetime.now()
 
@@ -45,7 +44,6 @@ NEW_ITEMS_INTERVAL_HOURS = int(os.getenv('NEW_ITEMS_INTERVAL_HOURS', 24))
 DB_FILE = os.getenv('DB_FILE', 'sent_items.db')
 
 def init_db():
-    # Создаем директорию для базы данных, если её нет
     db_dir = os.path.dirname(DB_FILE)
     if db_dir and not os.path.exists(db_dir):
         try:
@@ -55,10 +53,8 @@ def init_db():
             logger.error(f"Ошибка создания директории для базы данных: {e}", exc_info=True)
             raise
 
-    # Проверяем, существует ли файл базы данных
     is_new_db = not os.path.exists(DB_FILE)
 
-    # Подключаемся к базе данных (создаст файл, если его нет)
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
@@ -66,12 +62,10 @@ def init_db():
         if is_new_db:
             logger.info(f"Создан новый файл базы данных: {DB_FILE}")
 
-        # Проверяем существование таблицы
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sent_items'")
         table_exists = c.fetchone() is not None
 
         if not table_exists:
-            # Создаем новую таблицу
             c.execute('''
                 CREATE TABLE sent_items (
                     item_id TEXT PRIMARY KEY,
@@ -82,7 +76,6 @@ def init_db():
             ''')
             logger.info("Создана новая таблица sent_items")
         else:
-            # Проверяем и добавляем недостающие колонки
             c.execute("PRAGMA table_info(sent_items)")
             columns = {col[1] for col in c.fetchall()}
 
@@ -212,7 +205,7 @@ def get_poster_url(item_id):
 def group_episodes(items):
     """
     Группирует новые эпизоды по сериалу и сезону.
-    Возвращает список: [(series_name, season_number, [(ep_number, ep_name)], episode_sample), ...]
+    Возвращает список: [(series_name, season_number, [ep_number], [item]), ...]
     """
     episodes = {}
     for item in items:
@@ -220,15 +213,36 @@ def group_episodes(items):
             series_name = item.get('SeriesName', item.get('Name', 'Без названия'))
             season = item.get('ParentIndexNumber', 0)
             episode = item.get('IndexNumber', 0)
-            ep_name = item.get('Name', '')
             key = (series_name, season)
             if key not in episodes:
-                episodes[key] = {'list': [], 'sample': item}
-            episodes[key]['list'].append((episode, ep_name))
-    # Сортировка по номеру серии
+                episodes[key] = {'numbers': [], 'items': []}
+            episodes[key]['numbers'].append(episode)
+            episodes[key]['items'].append(item)
     for v in episodes.values():
-        v['list'].sort(key=lambda x: x[0])
-    return [(k[0], k[1], v['list'], v['sample']) for k, v in episodes.items()]
+        v['numbers'].sort()
+    return [(k[0], k[1], v['numbers'], v['items']) for k, v in episodes.items()]
+
+def build_simple_series_message(series_name, season, episode_numbers, items):
+    sample_item = items[-1]  # Последняя серия
+    year = sample_item.get('ProductionYear', '—')
+    genres = ', '.join(sample_item.get('Genres', [])) if sample_item.get('Genres') else '—'
+    date_added = sample_item.get('DateCreated', '')[:10] if sample_item.get('DateCreated') else '—'
+    episodes_str = ','.join(str(num) for num in episode_numbers)
+    content_type = 'Сериал'
+    if len(items) == 1:
+        overview = sample_item.get('Overview', 'Нет описания')
+    else:
+        overview = items[0].get('SeriesOverview') or sample_item.get('Overview', 'Нет описания')
+    message = (
+        f"<b>{series_name}</b>\n"
+        f"<b>Тип:</b> {content_type}\n"
+        f"<b>Год:</b> {year}\n"
+        f"<b>Жанр:</b> {genres}\n"
+        f"<b>Добавлено:</b> {date_added}\n"
+        f"<b>Сезон:</b> {season} <b>серия:</b> {episodes_str}\n\n"
+        f"{overview}"
+    )
+    return message
 
 def build_message(item):
     item_type = item.get('Type', 'Unknown')
@@ -263,24 +277,6 @@ def build_message(item):
     )
     return message, name, content_type
 
-def build_series_message(series_name, season, episode_list, sample_item):
-    content_type = 'Сериал'
-    year = sample_item.get('ProductionYear', '—')
-    genres = ', '.join(sample_item.get('Genres', [])) if sample_item.get('Genres') else '—'
-    date_added = sample_item.get('DateCreated', '')[:10] if sample_item.get('DateCreated') else '—'
-    overview = sample_item.get('Overview', 'Нет описания')
-    # Формируем строку: 7 (название), 8 (название)
-    episodes_str = ', '.join(f"{num} ({name})" if name else f"{num}" for num, name in episode_list)
-    message = (
-        f"<b>{series_name}</b>\n"
-        f"<b>Тип:</b> {content_type}\n"
-        f"<b>Год:</b> {year}\n"
-        f"<b>Жанр:</b> {genres}\n"
-        f"<b>Добавлено:</b> {date_added}\n"
-        f"<b>Сезон:</b> {season} <b>серии:</b> {episodes_str}\n\n"
-        f"{overview}"
-    )
-    return message
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
     if not date_str:
@@ -369,16 +365,16 @@ async def check_and_notify():
     processed += sum(len(g[2]) for g in episode_groups)
 
     # 3. Отправляем уведомления по группам эпизодов
-    for series_name, season, episode_list, sample_item in episode_groups:
-        poster_url = get_poster_url(sample_item['Id'])
-        message = build_series_message(series_name, season, episode_list, sample_item)
+    for series_name, season, episode_numbers, items in episode_groups:
+        poster_url = get_poster_url(items[-1]['Id'])
+        message = build_simple_series_message(series_name, season, episode_numbers, items)
         if await send_telegram_photo(poster_url, message):
-            for ep_num, ep_name in episode_list:
-                episode_id = f"{sample_item['SeriesId']}_S{season}E{ep_num}"
-                mark_as_sent(episode_id, ep_name, 'Episode')
-                logger.info(f"mark_as_sent: {episode_id}, {ep_name}, Episode")
+            for ep_item in items:
+                ep_num = ep_item.get('IndexNumber', 0)
+                episode_id = f"{ep_item['SeriesId']}_S{season}E{ep_num}"
+                mark_as_sent(episode_id, ep_item.get('Name', ''), 'Episode')
             sent += 1
- 
+
     # 4. Обрабатываем остальные типы (фильмы, новые сериалы)
     for item in items:
         if item.get('Type') != 'Episode' and not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
@@ -474,7 +470,6 @@ async def main_async():
     application.add_handler(CommandHandler("db_list", db_list_cmd))
     application.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
 
-    # Фоновая задача проверки новинок
     async def check_loop():
         while True:
             try:
