@@ -209,6 +209,26 @@ def get_new_items():
 def get_poster_url(item_id):
     return f"{JELLYFIN_URL}/Items/{item_id}/Images/Primary?maxWidth=600&tag=&quality=90&X-Emby-Token={JELLYFIN_API_KEY}"
 
+def group_episodes(items):
+    """
+    Группирует новые эпизоды по сериалу и сезону.
+    Возвращает список: [(series_name, season_number, [episode_numbers], episode_sample), ...]
+    """
+    episodes = {}
+    for item in items:
+        if item.get('Type') == 'Episode':
+            series_name = item.get('SeriesName', item.get('Name', 'Без названия'))
+            season = item.get('ParentIndexNumber', 0)
+            episode = item.get('IndexNumber', 0)
+            key = (series_name, season)
+            if key not in episodes:
+                episodes[key] = {'numbers': [], 'sample': item}
+            episodes[key]['numbers'].append(episode)
+    # Сортировка номеров серий
+    for v in episodes.values():
+        v['numbers'].sort()
+    return [(k[0], k[1], v['numbers'], v['sample']) for k, v in episodes.items()]
+
 def build_message(item):
     item_type = item.get('Type', 'Unknown')
     if item_type == 'Episode':
@@ -241,6 +261,24 @@ def build_message(item):
         f"{overview}"
     )
     return message, name, content_type
+
+def build_series_message(series_name, season, episode_numbers, sample_item):
+    content_type = 'Сериал'
+    year = sample_item.get('ProductionYear', '—')
+    genres = ', '.join(sample_item.get('Genres', [])) if sample_item.get('Genres') else '—'
+    date_added = sample_item.get('DateCreated', '')[:10] if sample_item.get('DateCreated') else '—'
+    overview = sample_item.get('Overview', 'Нет описания')
+    episodes_str = ','.join(str(num) for num in episode_numbers)
+    message = (
+        f"<b>{series_name}</b>\n"
+        f"<b>Тип:</b> {content_type}\n"
+        f"<b>Год:</b> {year}\n"
+        f"<b>Жанр:</b> {genres}\n"
+        f"<b>Добавлено:</b> {date_added}\n"
+        f"<b>Сезон:</b> {season} <b>серия:</b> {episodes_str}\n\n"
+        f"{overview}"
+    )
+    return message
 
 def is_recent(item, interval_hours):
     date_str = item.get('DateCreated')
@@ -314,16 +352,28 @@ async def check_and_notify():
     processed = 0
     sent = 0
 
-    for item in items:
-        processed += 1
-        item_id = item['Id']
+    # Группируем эпизоды
+    episode_groups = group_episodes(items)
+    processed += sum(len(g[2]) for g in episode_groups)
 
-        if not is_sent(item_id) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
-            poster_url = get_poster_url(item_id)
+    # Отправляем уведомления по группам эпизодов
+    for series_name, season, episode_numbers, sample_item in episode_groups:
+        poster_url = get_poster_url(sample_item['Id'])
+        message = build_series_message(series_name, season, episode_numbers, sample_item)
+        if await send_telegram_photo(poster_url, message):
+            for ep_num in episode_numbers:
+                mark_as_sent(f"{sample_item['SeriesId']}_S{season}E{ep_num}", series_name, 'Episode')
+            sent += 1
+
+    # Обрабатываем остальные типы (фильмы, новые сериалы)
+    for item in items:
+        if item.get('Type') != 'Episode' and not is_sent(item['Id']) and is_recent(item, NEW_ITEMS_INTERVAL_HOURS):
+            poster_url = get_poster_url(item['Id'])
             message, name, item_type = build_message(item)
             if await send_telegram_photo(poster_url, message):
-                mark_as_sent(item_id, name, item_type)
+                mark_as_sent(item['Id'], name, item_type)
                 sent += 1
+            processed += 1
 
     if processed > 0:
         logger.info(f"Проверка завершена. Обработано: {processed}, Отправлено: {sent}")
