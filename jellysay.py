@@ -20,14 +20,13 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 # Отключаем логи от python-telegram-bot
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('telegram').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 print("Logger handlers:", logger.handlers)
-
 # Константы для защиты от спама
 MESSAGE_DELAY = 3  # Задержка между сообщениями в секундах
 MAX_MESSAGES_PER_MINUTE = 20  # Максимум сообщений в минуту
@@ -416,32 +415,21 @@ async def start_check_loop():
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def main_async():
+    # Отключаем встроенные логи Application
     application = (ApplicationBuilder()
                   .token(TELEGRAM_BOT_TOKEN)
                   .job_queue(None)
                   .write_timeout(30)
                   .read_timeout(30)
                   .build())
-
+    
     application.add_handler(CommandHandler("force_check", force_check))
     application.add_handler(CommandHandler("clean_db", clean_db_cmd))
     application.add_handler(CommandHandler("stats", stats_cmd))
     application.add_handler(CommandHandler("help", help_cmd))
     application.add_handler(CommandHandler("db_list", db_list_cmd))
     application.add_handler(MessageHandler(filters.ALL, lambda update, context: None))
-
-    # Фоновая задача проверки новинок
-    async def check_loop():
-        while True:
-            try:
-                await check_and_notify()
-            except Exception as e:
-                logger.error(f'Ошибка в цикле проверки: {e}', exc_info=True)
-            await asyncio.sleep(CHECK_INTERVAL)
-
-    # Запускаем фоновую задачу
-    application.loop.create_task(check_loop())
-
+    
     logger.info("Бот запущен и готов к работе")
     await application.run_polling(allowed_updates=[])
 
