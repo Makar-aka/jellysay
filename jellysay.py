@@ -104,6 +104,18 @@ def init_db():
         logger.error(f"Ошибка инициализации базы данных: {e}", exc_info=True)
         raise
 
+def is_sent(item_id):
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('SELECT 1 FROM sent_items WHERE item_id = ?', (item_id,))
+        result = c.fetchone() is not None
+        conn.close()
+        return result
+    except Exception as e:
+        logger.error(f"Ошибка при проверке элемента в базе данных: {e}", exc_info=True)
+        return False
+
 def mark_as_sent(item_id, item_name="", item_type=""):
     try:
         conn = sqlite3.connect(DB_FILE)
