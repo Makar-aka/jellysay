@@ -75,13 +75,14 @@ def announce_new_releases_from_jellyfin():
 
         if item_type == "Movie":
             logging.info(f"Processing movie: {item_name}")
-            # Add movie processing logic here
+            # Аналогично: сформировать message и вызвать send_telegram_photo(message)
         elif item_type == "Season":
             logging.info(f"Processing season: {item_name}")
-            # Add season processing logic here
+            # Аналогично
         elif item_type == "Episode":
             logging.info(f"Processing episode: {item_name}")
-            # Add episode processing logic here
+            message = f"*Новая серия!*\n\nСериал: {series_name}\nСезон: {season_num}\nСерия: {season_epi}\nНазвание: {item_name}\nГод: {release_year}"
+            send_telegram_photo(message)
         else:
             logging.warning(f"Item type not supported: {item_type}")
             return "Item type not supported."
