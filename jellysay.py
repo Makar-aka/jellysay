@@ -36,7 +36,6 @@ JELLYFIN_API_KEY = os.environ["JELLYFIN_API_KEY"]
 YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
 EPISODE_PREMIERED_WITHIN_X_DAYS = int(os.environ["EPISODE_PREMIERED_WITHIN_X_DAYS"])
 SEASON_ADDED_WITHIN_X_DAYS = int(os.environ["SEASON_ADDED_WITHIN_X_DAYS"])
-TEST_MODE = os.getenv("TEST_MODE", "False").lower() == "true"
 
 # Path for the JSON file to store notified items
 notified_items_file = '/app/data/notified_items.json'
@@ -55,27 +54,7 @@ def save_notified_items(notified_items_to_save):
 
 notified_items = load_notified_items()
 
-# Mock data for testing
-def get_mock_item_details(item_id):
-    return {
-        "Items": [
-            {
-                "Id": item_id,
-                "Name": "Mock Item",
-                "SeriesId": "mock_series_id",
-                "SeasonId": "mock_season_id",
-                "PremiereDate": "2025-08-01T00:00:00Z",
-                "DateCreated": "2025-08-01T00:00:00Z",
-                "Overview": "This is a mock overview for testing purposes."
-            }
-        ]
-    }
-
-# Function to get item details (real or mock)
 def get_item_details(item_id):
-    if TEST_MODE:
-        logging.info("TEST_MODE enabled: Using mock data for item details.")
-        return get_mock_item_details(item_id)
     headers = {'accept': 'application/json'}
     params = {'api_key': JELLYFIN_API_KEY}
     url = f"{JELLYFIN_BASE_URL}/emby/Items?Recursive=true&Fields=DateCreated,Overview&Ids={item_id}"
@@ -93,15 +72,6 @@ def announce_new_releases_from_jellyfin():
         series_name = payload.get("SeriesName")
         season_epi = payload.get("EpisodeNumber00")
         season_num = payload.get("SeasonNumber00")
-
-        if TEST_MODE:
-            logging.info("TEST_MODE enabled: Simulating webhook processing.")
-            item_type = item_type or "Episode"
-            item_name = item_name or "Mock Episode"
-            release_year = release_year or 2025
-            series_name = series_name or "Mock Series"
-            season_epi = season_epi or 1
-            season_num = season_num or 1
 
         if item_type == "Movie":
             logging.info(f"Processing movie: {item_name}")
