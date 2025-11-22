@@ -1,9 +1,11 @@
-import os
+﻿import os
 import json
 
 # Переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+JELLYFIN_BASE_URL = os.getenv("JELLYFIN_BASE_URL")  # Базовый URL сервера Jellyfin
+JELLYFIN_API_KEY = os.getenv("JELLYFIN_API_KEY")    # API-ключ для Jellyfin
 
 # Загрузка шаблонов сообщений
 def load_templates():
