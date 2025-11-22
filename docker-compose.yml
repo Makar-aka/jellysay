@@ -1,4 +1,6 @@
-﻿services:
+﻿version: "3.8"
+
+services:
   jellysay:
     build:
       context: .
@@ -7,11 +9,6 @@
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-      JELLYFIN_BASE_URL: ${JELLYFIN_BASE_URL}
-      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
-      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY}
-      EPISODE_PREMIERED_WITHIN_X_DAYS: ${EPISODE_PREMIERED_WITHIN_X_DAYS}
-      SEASON_ADDED_WITHIN_X_DAYS: ${SEASON_ADDED_WITHIN_X_DAYS}
     volumes:
       - ./data:/app/data
       - ./log:/app/log
