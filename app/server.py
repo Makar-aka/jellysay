@@ -58,7 +58,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # Ответ на запрос
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"Webhook записан в базу.")
+            self.wfile.write("Webhook записан в базу.".encode("utf-8"))
         except Exception as e:
             log(f"Ошибка обработки вебхука: {e}")
             self.send_response(500)
