@@ -1,4 +1,4 @@
-﻿{
+{
     "Movie": "*🍿 Новый фильм!*\n\n*{Name}* ({Year})\n\n{Overview}",
     "Season": "*📺 Новый сезон!*\n\n*{SeriesName}* ({Year})\nСезон: {SeasonNumber00}\n\n{Overview}",
     "Episode": "*🎬 Новая серия!*\n\nСериал: *{SeriesName}*\nСезон: {SeasonNumber00}\nСерия: {EpisodeNumber00}\nНазвание: {Name}\nГод: {Year}\n\n{Overview}"

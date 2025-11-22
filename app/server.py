@@ -1,4 +1,4 @@
-﻿import json
+import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from app.telegram import send_telegram_message
 from app.config import load_templates
