@@ -10,6 +10,9 @@ COPY . .
 # Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Добавляем корневую директорию в PYTHONPATH
+ENV PYTHONPATH=/app
+
 # Создаём директории для логов и данных
 RUN mkdir -p /app/log /app/data
 
