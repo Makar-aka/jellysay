@@ -1,4 +1,5 @@
-﻿import json
+﻿import os  # Добавляем импорт модуля os
+import json
 
 # Переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -9,7 +10,6 @@ NOTIFICATION_PAUSE = int(os.getenv("NOTIFICATION_PAUSE", 5))  # Пауза ме�
 
 print(f"JELLYFIN_BASE_URL: {JELLYFIN_BASE_URL}")
 print(f"JELLYFIN_API_KEY: {JELLYFIN_API_KEY}")
-
 
 # Загрузка шаблонов сообщений
 def load_templates():
