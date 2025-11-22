@@ -1,8 +1,10 @@
-import json
+﻿import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from app.telegram import send_telegram_message
+from app.telegram import send_telegram_message, send_telegram_photo
 from app.config import load_templates
 from app.utils import log
+from app.utils import get_poster_url
+
 
 # Загрузка шаблонов сообщений
 templates = load_templates()
@@ -31,6 +33,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
             # Отправка сообщения в Telegram
             send_telegram_message(message)
+
+            # Получение и отправка постера (если требуется)
+            item_id = payload.get("ItemId")
+            if item_id:
+                poster_url = get_poster_url(item_id)
+                log(f"Poster URL: {poster_url}")
+                send_telegram_photo(poster_url, message)
 
             # Ответ на запрос
             self.send_response(200)
