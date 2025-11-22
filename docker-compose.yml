@@ -4,12 +4,13 @@ services:
   jellysay:
     build:
       context: .
-      dockerfile: Dockerfile
     ports:
       - "3535:3535"
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      JELLYFIN_BASE_URL: ${JELLYFIN_BASE_URL}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY}
     volumes:
       - ./data:/app/data
       - ./log:/app/log
