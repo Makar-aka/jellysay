@@ -1,12 +1,8 @@
 ﻿import json
-import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from app.database import get_unsent_webhooks, mark_webhook_as_sent, insert_webhook, init_db
 from app.telegram import send_telegram_message, send_telegram_photo
-from app.config import load_templates, NOTIFICATION_PAUSE
-from app.utils import log
-from app.utils import get_poster_url, save_poster
-    
+from app.config import load_templates
+from app.utils import log, get_poster_url, save_poster
 
 # Загрузка шаблонов сообщений
 templates = load_templates()
@@ -33,32 +29,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
             # Формирование сообщения
             message = templates[item_type].format(**payload)
 
-            # Отправка сообщения в Telegram
-            send_telegram_message(message)
-
             # Получение и отправка постера (если требуется)
             item_id = payload.get("ItemId")
             poster_url = get_poster_url(item_id) if item_id else None
             poster_path = save_poster(item_id, poster_url) if poster_url else None
 
-            # Запись вебхука в базу
-            insert_webhook({
-                "item_id": item_id,
-                "item_type": item_type,
-                "name": payload.get("Name"),
-                "year": payload.get("Year"),
-                "overview": payload.get("Overview"),
-                "series_name": payload.get("SeriesName"),
-                "season_number": payload.get("SeasonNumber00"),
-                "episode_number": payload.get("EpisodeNumber00"),
-                "poster_path": poster_path,
-                "sent": 0
-            })
+            if poster_path:
+                send_telegram_photo(poster_path, message)
+            else:
+                send_telegram_message(message)
 
             # Ответ на запрос
             self.send_response(200)
             self.end_headers()
-            self.wfile.write("Webhook записан в базу.".encode("utf-8"))
+            self.wfile.write("Webhook обработан.".encode("utf-8"))
         except Exception as e:
             log(f"Ошибка обработки вебхука: {e}")
             self.send_response(500)
@@ -70,36 +54,6 @@ def run_server(host="0.0.0.0", port=3535):
     log(f"Сервер запущен на {host}:{port}")
     server.serve_forever()
 
-def send_notifications():
-    """Отправка уведомлений порциями."""
-    while True:
-        webhooks = get_unsent_webhooks(limit=10)
-        if not webhooks:
-            log("Нет новых уведомлений для отправки.")
-            time.sleep(NOTIFICATION_PAUSE)
-            continue
-
-        for webhook in webhooks:
-            webhook_id, item_id, item_type, name, year, overview, series_name, season_number, episode_number, poster_path, sent = webhook
-            message = templates[item_type].format(
-                Name=name,
-                Year=year,
-                Overview=overview,
-                SeriesName=series_name,
-                SeasonNumber00=season_number,
-                EpisodeNumber00=episode_number
-            )
-            if poster_path:
-                send_telegram_photo(poster_path, message)
-            else:
-                send_telegram_message(message)
-            mark_webhook_as_sent(webhook_id)
-            time.sleep(NOTIFICATION_PAUSE)
-
 if __name__ == "__main__":
-    # Инициализация базы данных
-    init_db()
-    log("База данных инициализирована.")
-
     # Запуск сервера
     run_server()

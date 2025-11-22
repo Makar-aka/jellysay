@@ -1,5 +1,4 @@
-﻿import os
-import json
+﻿import json
 
 # Переменные окружения
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")

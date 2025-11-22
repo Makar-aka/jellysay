@@ -1,5 +1,4 @@
-﻿import logging
-from app.config import JELLYFIN_BASE_URL, JELLYFIN_API_KEY
+﻿from app.config import JELLYFIN_BASE_URL, JELLYFIN_API_KEY
 import requests
 import os
 
