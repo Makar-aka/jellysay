@@ -1,3 +1,4 @@
+﻿import logging  # Добавляем импорт модуля logging
 from app.config import JELLYFIN_BASE_URL, JELLYFIN_API_KEY
 import requests
 import os
