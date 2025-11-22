@@ -1,7 +1,7 @@
 ﻿import json
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from app.database import get_unsent_webhooks, mark_webhook_as_sent, insert_webhook
+from app.database import get_unsent_webhooks, mark_webhook_as_sent, insert_webhook, init_db
 from app.telegram import send_telegram_message, send_telegram_photo
 from app.config import load_templates, NOTIFICATION_PAUSE
 from app.utils import log
@@ -97,4 +97,9 @@ def send_notifications():
             time.sleep(NOTIFICATION_PAUSE)
 
 if __name__ == "__main__":
+    # Инициализация базы данных
+    init_db()
+    log("База данных инициализирована.")
+
+    # Запуск сервера
     run_server()
