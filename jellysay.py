@@ -10,7 +10,7 @@ import sys
 import threading
 import tempfile
 
-# Попытка импортировать requests с понятным логом при ошибке
+# Попытка импортировать      с понятным логом при ошибке
 try:
     import requests
     from requests.exceptions import HTTPError, RequestException
@@ -217,6 +217,140 @@ def send_telegram_photo(photo_url_or_id, caption):
         except Exception as ex:
             logger.exception("Fallback send_telegram_message failed: %s", ex)
             return None
+
+def process_payload(payload):
+    """
+    Нормализует payload, безопасно извлекает season/episode номера с fallback'ами,
+    определяет тип элемента и отправляет уведомление.
+    Возвращает (dict, status_code).
+    """
+    logger.info("Получен вебхук: %s", payload)
+
+    item_id = payload.get("ItemId")
+    details = None
+    if item_id:
+        try:
+            details = get_item_details(item_id)
+        except Exception as e:
+            logger.warning("Не удалось получить details для ItemId=%s: %s", item_id, e)
+            details = None
+
+    # Получаем тип (Jellyfin detail -> Items[0].Type) или из payload
+    resolved_type = None
+    if details and isinstance(details, dict):
+        resolved_type = details.get("Items", [{}])[0].get("Type")
+    resolved_type = (resolved_type or payload.get("ItemType") or payload.get("Type") or "Video")
+
+    # Год/уникальный ключ для notified_items
+    release_year = payload.get("Year") or ""
+    if not release_year and details:
+        try:
+            prod = details.get("Items", [{}])[0].get("ProductionYear")
+            if prod:
+                release_year = str(prod)
+            else:
+                prem = details.get("Items", [{}])[0].get("PremiereDate", "")
+                if prem:
+                    release_year = prem.split("T")[0].split("-")[0]
+        except Exception:
+            release_year = ""
+
+    unique_key = release_year or item_id or str(payload.get("Timestamp") or "")
+
+    # Имя и сериал
+    name = payload.get("Name") or (details.get("Items", [{}])[0].get("Name") if details else "Unknown")
+    series_name = payload.get("SeriesName") or (details.get("Items", [{}])[0].get("SeriesName") if details else "")
+
+    # Безопасный извлечение номера сезона/эпизода с множеством fallback'ов
+    def first_non_empty(*vals):
+        for v in vals:
+            if v is None:
+                continue
+            # допускаем 0 как валидное значение, поэтому проверяем на пустую строку и None
+            if isinstance(v, (int, float)) or (isinstance(v, str) and v.strip() != ""):
+                return str(v)
+        return ""
+
+    season_num = first_non_empty(
+        payload.get("SeasonNumber00"),
+        payload.get("SeasonNumber"),
+        payload.get("ParentIndexNumber"),
+        payload.get("SeasonIndex"),
+        (details.get("Items", [{}])[0].get("ParentIndexNumber") if details else None),
+        (details.get("Items", [{}])[0].get("SeasonNumber") if details else None)
+    )
+
+    episode_num = first_non_empty(
+        payload.get("EpisodeNumber00"),
+        payload.get("EpisodeNumber"),
+        payload.get("IndexNumber"),
+        payload.get("EpisodeIndex"),
+        (details.get("Items", [{}])[0].get("IndexNumber") if details else None)
+    )
+
+    overview = payload.get("Overview") or (details.get("Items", [{}])[0].get("Overview") if details else "")
+
+    # Дубликат?
+    if item_already_notified(resolved_type, name, unique_key):
+        logger.info("Уведомление уже отправлено: %s %s %s", resolved_type, name, unique_key)
+        return {"status": "ok", "message": "Already notified"}, 200
+
+    try:
+        # Movie
+        if resolved_type and resolved_type.lower() == "movie":
+            clean_name = name.replace(f" ({release_year})", "").strip() if release_year else name
+            message = f"*🍿 Добавлен новый фильм*\n\n*{clean_name}* ({release_year})\n\n{overview}"
+            trailer = get_youtube_trailer_url(f"{clean_name} Trailer {release_year}") if YOUTUBE_API_KEY else None
+            if trailer:
+                message += f"\n\n[Трейлер]({trailer})"
+            send_telegram_photo(item_id, message)
+            mark_item_as_notified("Movie", name, unique_key)
+            return {"status": "ok", "message": "Movie notified"}, 200
+
+        # Episode (учитываем разные форматы)
+        if resolved_type and resolved_type.lower() == "episode":
+            premiere = None
+            try:
+                premiere = (details.get("Items", [{}])[0].get("PremiereDate") or "").split("T")[0] if details else None
+            except Exception:
+                premiere = None
+
+            # проверка возраста сезона (если доступна)
+            try:
+                season_id = payload.get("SeasonId") or (details.get("Items", [{}])[0].get("SeasonId") if details else None)
+                season_date_created = None
+                if season_id:
+                    sdet = get_item_details(season_id)
+                    season_date_created = sdet.get("Items", [{}])[0].get("DateCreated", "").split("T")[0]
+                if season_date_created and not is_not_within_last_x_days(season_date_created, SEASON_ADDED_WITHIN_X_DAYS):
+                    logger.info("Сезон добавлен недавно, пропускаем уведомление об эпизоде: %s", name)
+                    return {"status": "ok", "message": "Season added recently, skipped"}, 200
+            except Exception:
+                logger.debug("Не удалось получить дату создания сезона — продолжаем")
+
+            # проверка премьеры эпизода
+            if premiere and not is_within_last_x_days(premiere, EPISODE_PREMIERED_WITHIN_X_DAYS):
+                logger.info("Эпизод премьеровался раньше порога, пропуск: %s", name)
+                return {"status": "ok", "message": "Episode too old, skipped"}, 200
+
+            s = season_num or "?"
+            e = episode_num or "?"
+            message = f"*🎬 Добавлен новый эпизод*\n\n*Сериал*: {series_name}\nСезон: {s}  Эпизод: {e}\n*Название*: {name}\n\n{overview}"
+            send_telegram_photo(item_id or season_id, message)
+            mark_item_as_notified("Episode", name, unique_key)
+            return {"status": "ok", "message": "Episode notified"}, 200
+
+        # Fallback — generic video
+        message = f"*Добавлен новый медиафайл*\n\n*{name}*\n\n{overview}"
+        send_telegram_photo(item_id, message)
+        mark_item_as_notified("Video", name, unique_key)
+        return {"status": "ok", "message": "Generic video notified"}, 200
+
+    except Exception as e:
+        logger.exception("Ошибка при обработке payload в process_payload: %s", e)
+        return {"status": "error", "message": str(e)}, 500
+
+
 # Основной webhook
 @app.route("/webhook", methods=["POST"])
 def announce_new_releases_from_jellyfin():
