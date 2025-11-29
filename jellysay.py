@@ -178,32 +178,45 @@ def send_telegram_message(text):
         return None
 
 def send_telegram_photo(photo_url_or_id, caption):
-    # Если аргумент похож на URL — скачиваем, иначе пробуем как item id на Jellyfin
+    """
+    Надёжно скачивает постер через session и отправляет в Telegram.
+    В случае ошибок — логирует и делает fallback: отправляет текстовое сообщение.
+    """
     if not photo_url_or_id:
         return send_telegram_message(caption)
-    # Try to download poster using a full URL or constructed Jellyfin Primary URL
-    if not str(photo_url_or_id).startswith("http"):
-        photo_url = get_poster_url(photo_url_or_id)
-    else:
-        photo_url = photo_url_or_id
+
+    # Если аргумент — не URL, формируем Jellyfin Primary URL
+    photo_url = photo_url_or_id if str(photo_url_or_id).startswith("http") else get_poster_url(photo_url_or_id)
+
     try:
+        logger.debug("Downloading poster from %s", photo_url)
         img_resp = session.get(photo_url, timeout=DEFAULT_TIMEOUT)
-        if img_resp.status_code != 200 or not img_resp.content:
-            logger.warning("Image not available %s -> fallback to text", photo_url)
+        img_resp.raise_for_status()
+        if not img_resp.content:
+            logger.warning("Poster response is empty: %s", photo_url)
             return send_telegram_message(caption)
+
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {"photo": ("poster.jpg", img_resp.content)}
         data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
-        resp = session.post(url, data=data, files=files, timeout=DEFAULT_TIMEOUT)
-        if resp.status_code == 200:
-            logger.info("Telegram photo sent")
-        else:
-            logger.error("Telegram send photo failed: %s %s", resp.status_code, resp.text)
-        return resp
-    except RequestException as e:
-        logger.exception("Error sending photo: %s", e)
-        return send_telegram_message(caption)
 
+        resp = session.post(url, data=data, files=files, timeout=DEFAULT_TIMEOUT)
+        try:
+            resp.raise_for_status()
+            logger.info("Telegram photo sent (status=%s)", resp.status_code)
+        except RequestException:
+            logger.error("Telegram send photo failed: %s %s", getattr(resp, "status_code", None), getattr(resp, "text", None))
+        return resp
+
+    except RequestException as e:
+        # Логируем детально при ошибке подключения к Jellyfin или Telegram
+        logger.warning("Ошибка сохранения постера: %s", e)
+        # fallback: отправляем обычное текстовое сообщение
+        try:
+            return send_telegram_message(caption)
+        except Exception as ex:
+            logger.exception("Fallback send_telegram_message failed: %s", ex)
+            return None
 # Основной webhook
 @app.route("/webhook", methods=["POST"])
 def announce_new_releases_from_jellyfin():
