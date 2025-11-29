@@ -208,85 +208,43 @@ def send_telegram_photo(photo_url_or_id, caption):
 @app.route("/webhook", methods=["POST"])
 def announce_new_releases_from_jellyfin():
     try:
-        payload = request.get_json(force=True, silent=True)
-        if not isinstance(payload, dict):
-            logger.warning("Invalid payload")
-            return jsonify({"status": "error", "message": "Invalid payload"}), 400
+        # Логируем заголовки и сырое тело для диагностики
+        try:
+            raw_body = request.get_data(as_text=True)
+        except Exception:
+            raw_body = "<cannot read body>"
+        logger.info("Webhook headers: %s", dict(request.headers))
+        logger.info("Webhook content-type: %s", request.content_type)
+        logger.info("Webhook raw body (first 2000 chars): %s", raw_body[:2000])
 
+        # Попытки парсинга: 1) JSON автоматически, 2) form-data, 3) явный json.loads(raw)
+        payload = None
+        payload = request.get_json(force=False, silent=True)
+        if payload is None and request.form:
+            payload = request.form.to_dict()
+            logger.info("Parsed payload from form-data")
+        if payload is None and raw_body:
+            try:
+                payload = json.loads(raw_body)
+                logger.info("Parsed payload from raw JSON")
+            except Exception:
+                payload = None
+
+        if not isinstance(payload, dict):
+            logger.warning("Invalid payload format, cannot parse to dict")
+            return jsonify({"status": "error", "message": "Invalid payload format"}), 400
+
+        # проверяем обязательные поля
         item_type = payload.get("ItemType")
         item_name = payload.get("Name")
         release_year = payload.get("Year")
-        series_name = payload.get("SeriesName")
-        season_epi = payload.get("EpisodeNumber00")
-        season_num = payload.get("SeasonNumber00")
-        item_id = payload.get("ItemId")
-
         if not item_type or not item_name or not release_year:
-            logger.warning("Missing required fields in payload: %s", payload)
-            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+            logger.warning("Missing required fields: ItemType/Name/Year. Payload keys: %s", list(payload.keys()))
+            return jsonify({"status": "error", "message": "Missing required fields: ItemType/Name/Year"}), 400
 
-        if item_already_notified(item_type, item_name, release_year):
-            logger.info("Already notified: %s %s %s", item_type, item_name, release_year)
-            return jsonify({"status": "ok", "message": "Already notified"}), 200
-
-        trailer_url = get_youtube_trailer_url(f"{item_name} Trailer {release_year}")
-        # Простая сборка сообщений (можно вынести в функцию)
-        if item_type == "Movie":
-            overview = payload.get("Overview", "")
-            runtime = payload.get("RunTime", "")
-            name_clean = item_name.replace(f" ({release_year})", "").strip()
-            message = f"*🍿 Добавлен новый фильм *\n\n*{name_clean}* ({release_year})\n\n{overview}\n\nДлительность: {runtime}"
-            if trailer_url:
-                message += f"\n\n[Трейлер]({trailer_url})"
-            send_telegram_photo(item_id, message)
-            mark_item_as_notified(item_type, item_name, release_year)
-            return jsonify({"status": "ok", "message": "Movie notified"}), 200
-
-        if item_type == "Season":
-            season = item_name
-            season_details = get_item_details(item_id)
-            series_id = season_details["Items"][0].get("SeriesId")
-            series_name_clean = (series_name or "").replace(f" ({release_year})", "").strip()
-            overview = payload.get("Overview") or (get_item_details(series_id)["Items"][0].get("Overview") if series_id else "")
-            message = f"*📺 Добавлен новый сезон*\n\n*{series_name_clean}* ({release_year})\n\n{season}\n\n{overview}"
-            resp = send_telegram_photo(item_id, message)
-            if resp and getattr(resp, "status_code", None) == 200:
-                mark_item_as_notified(item_type, item_name, release_year)
-            else:
-                # fallback: try series image
-                try:
-                    send_telegram_photo(series_id, message)
-                    mark_item_as_notified(item_type, item_name, release_year)
-                except Exception:
-                    logger.warning("Season notify fallback failed")
-            return jsonify({"status": "ok", "message": "Season processed"}), 200
-
-        if item_type == "Episode":
-            details = get_item_details(item_id)
-            season_id = details["Items"][0].get("SeasonId")
-            premiere = details["Items"][0].get("PremiereDate", "").split("T")[0]
-            season_details = get_item_details(season_id)
-            series_id = season_details["Items"][0].get("SeriesId")
-            season_date_created = season_details["Items"][0].get("DateCreated", "").split("T")[0]
-            if not is_not_within_last_x_days(season_date_created, SEASON_ADDED_WITHIN_X_DAYS):
-                logger.info("Season added recently, skip episode notify")
-                return jsonify({"status": "ok", "message": "Season added recently, skipped"}), 200
-            if premiere and is_within_last_x_days(premiere, EPISODE_PREMIERED_WITHIN_X_DAYS):
-                overview = payload.get("Overview", "")
-                message = f"*🎬 Добавлен новый эпизод*\n\n*Дата премьеры*: {premiere}\n\n*Сериал*: {series_name} S{season_num}E{season_epi}\n*Название*: {item_name}\n\n{overview}"
-                resp = send_telegram_photo(season_id, message)
-                if resp and getattr(resp, "status_code", None) == 200:
-                    mark_item_as_notified(item_type, item_name, release_year)
-                else:
-                    send_telegram_photo(series_id, message)
-                    mark_item_as_notified(item_type, item_name, release_year)
-                return jsonify({"status": "ok", "message": "Episode processed"}), 200
-            else:
-                logger.info("Episode premiered earlier than threshold, skip")
-                return jsonify({"status": "ok", "message": "Episode too old, skipped"}), 200
-
-        logger.error("Unsupported item type: %s", item_type)
-        return jsonify({"status": "error", "message": "Unsupported item type"}), 400
+        # ...далее оставьте вашу существующую логику обработки (Movie/Season/Episode)...
+        # для компактности — вызываем существующую логику через вспомогательную функцию process_payload
+        return process_payload(payload)
 
     except HTTPError as he:
         logger.error("HTTP error while processing webhook: %s", he)
