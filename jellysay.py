@@ -1,277 +1,300 @@
+#!/usr/bin/env python3
 import logging
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime, timedelta
 import os
 import json
-import requests
-from requests.exceptions import HTTPError
-from flask import Flask, request
+from pathlib import Path
 from dotenv import load_dotenv
+import sys
+import threading
+import tempfile
+
+# Попытка импортировать requests с понятным логом при ошибке
+try:
+    import requests
+    from requests.exceptions import HTTPError, RequestException
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+except Exception as e:
+    print(f"Critical: cannot import requests: {e}", file=sys.stderr)
+    raise
+
+from flask import Flask, request, jsonify
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# Set up logging
-log_directory = '/app/log'
-log_filename = os.path.join(log_directory, 'jellyfin_telegram-notifier.log')
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Пути и директории
+BASE_DIR = Path(os.getenv("JELLYSAY_BASE_DIR", "/app"))
+LOG_DIRECTORY = BASE_DIR / "log"
+DATA_DIRECTORY = BASE_DIR / "data"
+LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
+NOTIFIED_ITEMS_FILE = DATA_DIRECTORY / "notified_items.json"
 
-# Ensure the log directory exists
-os.makedirs(log_directory, exist_ok=True)
+# Логирование
+log_filename = LOG_DIRECTORY / "jellyfin_telegram-notifier.log"
+logger = logging.getLogger("jellysay")
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+rotating_handler = TimedRotatingFileHandler(str(log_filename), when="midnight", interval=1, backupCount=7, encoding="utf-8")
+rotating_handler.setFormatter(formatter)
+logger.addHandler(rotating_handler)
 
-# Create a handler for rotating log files daily
-rotating_handler = TimedRotatingFileHandler(log_filename, when="midnight", interval=1, backupCount=7)
-rotating_handler.setLevel(logging.INFO)
-rotating_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+# Проверка обязательных переменных окружения
+def require_env(name):
+    value = os.getenv(name)
+    if not value:
+        logger.error("Missing required environment variable: %s", name)
+        raise SystemExit(1)
+    return value
 
-# Add the rotating handler to the logger
-logging.getLogger().addHandler(rotating_handler)
+TELEGRAM_BOT_TOKEN = require_env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = require_env("TELEGRAM_CHAT_ID")
+JELLYFIN_BASE_URL = require_env("JELLYFIN_BASE_URL")
+JELLYFIN_API_KEY = require_env("JELLYFIN_API_KEY")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+try:
+    EPISODE_PREMIERED_WITHIN_X_DAYS = int(os.getenv("EPISODE_PREMIERED_WITHIN_X_DAYS", "7"))
+    SEASON_ADDED_WITHIN_X_DAYS = int(os.getenv("SEASON_ADDED_WITHIN_X_DAYS", "3"))
+except ValueError:
+    EPISODE_PREMIERED_WITHIN_X_DAYS = 7
+    SEASON_ADDED_WITHIN_X_DAYS = 3
 
+# Requests: сессия + ретраи + таймаут
+DEFAULT_TIMEOUT = 10
+session = requests.Session()
+retries = Retry(total=3, backoff_factor=0.3, status_forcelist=(429, 500, 502, 503, 504))
+session.mount("https://", HTTPAdapter(max_retries=retries))
+session.mount("http://", HTTPAdapter(max_retries=retries))
 
-# Constants
-TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-JELLYFIN_BASE_URL = os.environ["JELLYFIN_BASE_URL"]
-JELLYFIN_API_KEY = os.environ["JELLYFIN_API_KEY"]
-YOUTUBE_API_KEY = os.environ["YOUTUBE_API_KEY"]
-EPISODE_PREMIERED_WITHIN_X_DAYS = int(os.environ["EPISODE_PREMIERED_WITHIN_X_DAYS"])
-SEASON_ADDED_WITHIN_X_DAYS = int(os.environ["SEASON_ADDED_WITHIN_X_DAYS"])
+# Работа с notified_items — потокобезопасно
+_notified_lock = threading.Lock()
 
-# Path for the JSON file to store notified items
-notified_items_file = '/app/data/notified_items.json'
-
-
-# Function to load notified items from the JSON file
 def load_notified_items():
-    if os.path.exists(notified_items_file):
-        with open(notified_items_file, 'r') as file:
-            return json.load(file)
-    return {}
+    with _notified_lock:
+        if NOTIFIED_ITEMS_FILE.exists():
+            try:
+                return json.loads(NOTIFIED_ITEMS_FILE.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.error("Cannot read notified items file: %s", e)
+                return {}
+        return {}
 
-
-# Function to save notified items to the JSON file
-def save_notified_items(notified_items_to_save):
-    with open(notified_items_file, 'w') as file:
-        json.dump(notified_items_to_save, file)
-
+def save_notified_items(data):
+    with _notified_lock:
+        try:
+            # атомарная запись
+            with tempfile.NamedTemporaryFile("w", delete=False, dir=str(DATA_DIRECTORY), encoding="utf-8") as tmp:
+                json.dump(data, tmp, ensure_ascii=False, indent=None)
+                tmp_path = Path(tmp.name)
+            tmp_path.replace(NOTIFIED_ITEMS_FILE)
+        except Exception as e:
+            logger.exception("Failed to save notified items: %s", e)
 
 notified_items = load_notified_items()
 
-
-def send_telegram_photo(photo_id, caption):
-    base_photo_url = f"{JELLYFIN_BASE_URL}/Items/{photo_id}/Images"
-    primary_photo_url = f"{base_photo_url}/Primary"
-
-    # Download the image from the jellyfin
-    image_response = requests.get(primary_photo_url)
-
-    # Upload the image to the Telegram bot
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "caption": caption,
-        "parse_mode": "Markdown"
-    }
-
-    files = {'photo': ('photo.jpg', image_response.content, 'image/jpeg')}
-    response = requests.post(url, data=data, files=files)
-    return response
-
-
-def get_item_details(item_id):
-    headers = {'accept': 'application/json', }
-    params = {'api_key': JELLYFIN_API_KEY, }
-    url = f"{JELLYFIN_BASE_URL}/emby/Items?Recursive=true&Fields=DateCreated, Overview&Ids={item_id}"
-    response = requests.get(url, headers=headers, params=params)
-    response.raise_for_status()  # Check if request was successful
-    return response.json()
-
-
-def is_within_last_x_days(date_str, x):
-    days_ago = datetime.now() - timedelta(days=x)
-    return date_str >= days_ago.isoformat()
-
-
-def is_not_within_last_x_days(date_str, x):
-    days_ago = datetime.now() - timedelta(days=x)
-    return date_str < days_ago.isoformat()
-
-
-def get_youtube_trailer_url(query):
-    base_search_url = "https://www.googleapis.com/youtube/v3/search"
-    if not YOUTUBE_API_KEY:
-        return None
-    api_key = YOUTUBE_API_KEY
-
-    params = {
-        'part': 'snippet',
-        'q': query,
-        'type': 'video',
-        'key': api_key
-    }
-
-    response = requests.get(base_search_url, params=params)
-    response.raise_for_status()  # Check for HTTP errors before processing the data
-    response_data = response.json()
-    video_id = response_data.get("items", [{}])[0].get('id', {}).get('videoId')
-
-    return f"https://www.youtube.com/watch?v={video_id}" if video_id else "Видео не найдено!"
-
+def item_key(item_type, item_name, release_year):
+    return f"{item_type}:{item_name}:{release_year}"
 
 def item_already_notified(item_type, item_name, release_year):
-    key = f"{item_type}:{item_name}:{release_year}"
-    return key in notified_items
-
+    return item_key(item_type, item_name, release_year) in notified_items
 
 def mark_item_as_notified(item_type, item_name, release_year, max_entries=100):
-    key = f"{item_type}:{item_name}:{release_year}"
-    notified_items[key] = True
+    key = item_key(item_type, item_name, release_year)
+    with _notified_lock:
+        notified_items[key] = True
+        if len(notified_items) > max_entries:
+            # удаляем самый старый ключ (порядок вставки сохраняется в Python 3.7+)
+            oldest_key = next(iter(notified_items))
+            notified_items.pop(oldest_key, None)
+            logger.info("Key '%s' removed from notified_items", oldest_key)
+        save_notified_items(notified_items)
 
-    # Check if the number of entries in notified_items exceeds the limit
-    if len(notified_items) > max_entries:
-        # Get a list of keys (notification identifiers) sorted by their insertion order (oldest first)
-        keys_sorted_by_insertion_order = sorted(notified_items, key=notified_items.get)
+# Утилиты
+def parse_date_only(date_str):
+    if not date_str:
+        return None
+    try:
+        return datetime.fromisoformat(date_str.split("T")[0])
+    except Exception:
+        try:
+            return datetime.strptime(date_str.split("T")[0], "%Y-%m-%d")
+        except Exception:
+            return None
 
-        # Remove the oldest entry from the dictionary
-        oldest_key = keys_sorted_by_insertion_order[0]
-        del notified_items[oldest_key]
-        logging.info(f"Key '{oldest_key}' has been deleted from notified_items")
-    # Save the updated notified items to the JSON file
-    save_notified_items(notified_items)
+def is_within_last_x_days(date_str, x):
+    dt = parse_date_only(date_str)
+    if not dt:
+        return False
+    return dt >= (datetime.now() - timedelta(days=x))
 
+def is_not_within_last_x_days(date_str, x):
+    dt = parse_date_only(date_str)
+    if not dt:
+        # если нет даты — считаем как "не в пределах"
+        return True
+    return dt < (datetime.now() - timedelta(days=x))
 
+def get_item_details(item_id):
+    url = f"{JELLYFIN_BASE_URL}/emby/Items?Recursive=true&Fields=DateCreated,Overview,PremiereDate&Ids={item_id}"
+    try:
+        resp = session.get(url, headers={"accept": "application/json"}, params={"api_key": JELLYFIN_API_KEY}, timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+    except RequestException as e:
+        logger.exception("Error fetching item details %s: %s", item_id, e)
+        raise
+
+def get_youtube_trailer_url(query):
+    if not YOUTUBE_API_KEY:
+        return None
+    url = "https://www.googleapis.com/youtube/v3/search"
+    params = {"part": "snippet", "q": query, "type": "video", "key": YOUTUBE_API_KEY, "maxResults": 1}
+    try:
+        resp = session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        video_id = data.get("items", [{}])[0].get("id", {}).get("videoId")
+        return f"https://www.youtube.com/watch?v={video_id}" if video_id else None
+    except RequestException as e:
+        logger.warning("YouTube search failed: %s", e)
+        return None
+
+def get_poster_url(item_id):
+    return f"{JELLYFIN_BASE_URL}/Items/{item_id}/Images/Primary?maxWidth=600&quality=90&X-Emby-Token={JELLYFIN_API_KEY}"
+
+def send_telegram_message(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        resp = session.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        logger.info("Telegram message sent")
+        return resp
+    except RequestException as e:
+        logger.error("Telegram send message failed: %s", e)
+        return None
+
+def send_telegram_photo(photo_url_or_id, caption):
+    # Если аргумент похож на URL — скачиваем, иначе пробуем как item id на Jellyfin
+    if not photo_url_or_id:
+        return send_telegram_message(caption)
+    # Try to download poster using a full URL or constructed Jellyfin Primary URL
+    if not str(photo_url_or_id).startswith("http"):
+        photo_url = get_poster_url(photo_url_or_id)
+    else:
+        photo_url = photo_url_or_id
+    try:
+        img_resp = session.get(photo_url, timeout=DEFAULT_TIMEOUT)
+        if img_resp.status_code != 200 or not img_resp.content:
+            logger.warning("Image not available %s -> fallback to text", photo_url)
+            return send_telegram_message(caption)
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        files = {"photo": ("poster.jpg", img_resp.content)}
+        data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
+        resp = session.post(url, data=data, files=files, timeout=DEFAULT_TIMEOUT)
+        if resp.status_code == 200:
+            logger.info("Telegram photo sent")
+        else:
+            logger.error("Telegram send photo failed: %s %s", resp.status_code, resp.text)
+        return resp
+    except RequestException as e:
+        logger.exception("Error sending photo: %s", e)
+        return send_telegram_message(caption)
+
+# Основной webhook
 @app.route("/webhook", methods=["POST"])
 def announce_new_releases_from_jellyfin():
     try:
-        payload = json.loads(request.data)
+        payload = request.get_json(force=True, silent=True)
+        if not isinstance(payload, dict):
+            logger.warning("Invalid payload")
+            return jsonify({"status": "error", "message": "Invalid payload"}), 400
+
         item_type = payload.get("ItemType")
         item_name = payload.get("Name")
         release_year = payload.get("Year")
         series_name = payload.get("SeriesName")
         season_epi = payload.get("EpisodeNumber00")
         season_num = payload.get("SeasonNumber00")
+        item_id = payload.get("ItemId")
 
+        if not item_type or not item_name or not release_year:
+            logger.warning("Missing required fields in payload: %s", payload)
+            return jsonify({"status": "error", "message": "Missing required fields"}), 400
+
+        if item_already_notified(item_type, item_name, release_year):
+            logger.info("Already notified: %s %s %s", item_type, item_name, release_year)
+            return jsonify({"status": "ok", "message": "Already notified"}), 200
+
+        trailer_url = get_youtube_trailer_url(f"{item_name} Trailer {release_year}")
+        # Простая сборка сообщений (можно вынести в функцию)
         if item_type == "Movie":
-            if not item_already_notified(item_type, item_name, release_year):
-                movie_id = payload.get("ItemId")
-                overview = payload.get("Overview")
-                runtime = payload.get("RunTime")
-                # Remove release_year from movie_name if present
-                movie_name = item_name
-                movie_name_cleaned = movie_name.replace(f" ({release_year})", "").strip()
-
-                trailer_url = get_youtube_trailer_url(f"{movie_name_cleaned} Trailer {release_year}")
-
-                notification_message = (
-                    f"*🍿Добавлен новый фильм🍿*\n\n*{movie_name_cleaned}* *({release_year})*\n\n{overview}\n\n"
-                    f"Длительность\n{runtime}"
-                )
-
-                if trailer_url:
-                    notification_message += f"\n\n[🎥]({trailer_url})[Трейлер]({trailer_url})"
-
-                send_telegram_photo(movie_id, notification_message)
-                mark_item_as_notified(item_type, item_name, release_year)
-                logging.info(f"(Movie) {movie_name} {release_year} — уведомление отправлено в Telegram.")
-                return "Уведомление о фильме отправлено в Telegram"
+            overview = payload.get("Overview", "")
+            runtime = payload.get("RunTime", "")
+            name_clean = item_name.replace(f" ({release_year})", "").strip()
+            message = f"*🍿 Добавлен новый фильм *\n\n*{name_clean}* ({release_year})\n\n{overview}\n\nДлительность: {runtime}"
+            if trailer_url:
+                message += f"\n\n[Трейлер]({trailer_url})"
+            send_telegram_photo(item_id, message)
+            mark_item_as_notified(item_type, item_name, release_year)
+            return jsonify({"status": "ok", "message": "Movie notified"}), 200
 
         if item_type == "Season":
-            if not item_already_notified(item_type, item_name, release_year):
-                season_id = payload.get("ItemId")
-                season = item_name
-                season_details = get_item_details(season_id)
-                series_id = season_details["Items"][0].get("SeriesId")
-                series_details = get_item_details(series_id)
-                # Remove release_year from series_name if present
-                series_name_cleaned = series_name.replace(f" ({release_year})", "").strip()
-
-                # Get series overview if season overview is empty
-                overview_to_use = payload.get("Overview") if payload.get("Overview") else series_details["Items"][0].get(
-                    "Overview")
-
-                notification_message = (
-                    f"*Добавлен новый сезон*\n\n*{series_name_cleaned}* *({release_year})*\n\n"
-                    f"*{season}*\n\n{overview_to_use}\n\n"
-                )
-
-                response = send_telegram_photo(season_id, notification_message)
-
-                if response.status_code == 200:
+            season = item_name
+            season_details = get_item_details(item_id)
+            series_id = season_details["Items"][0].get("SeriesId")
+            series_name_clean = (series_name or "").replace(f" ({release_year})", "").strip()
+            overview = payload.get("Overview") or (get_item_details(series_id)["Items"][0].get("Overview") if series_id else "")
+            message = f"*📺 Добавлен новый сезон*\n\n*{series_name_clean}* ({release_year})\n\n{season}\n\n{overview}"
+            resp = send_telegram_photo(item_id, message)
+            if resp and getattr(resp, "status_code", None) == 200:
+                mark_item_as_notified(item_type, item_name, release_year)
+            else:
+                # fallback: try series image
+                try:
+                    send_telegram_photo(series_id, message)
                     mark_item_as_notified(item_type, item_name, release_year)
-                    logging.info(f"(Season) {series_name_cleaned} {season} — уведомление отправлено в Telegram.")
-                    return "Уведомление о сезоне отправлено в Telegram"
-                else:
-                    send_telegram_photo(series_id, notification_message)
-                    mark_item_as_notified(item_type, item_name, release_year)
-                    logging.warning(f"{series_name_cleaned} {season} изображение отсутствует, использовано изображение сериала")
-                    logging.info(f"(Season) {series_name_cleaned} {season} — уведомление отправлено в Telegram")
-                    return "Уведомление о сезоне отправлено в Telegram"
+                except Exception:
+                    logger.warning("Season notify fallback failed")
+            return jsonify({"status": "ok", "message": "Season processed"}), 200
 
         if item_type == "Episode":
-            if not item_already_notified(item_type, item_name, release_year):
-                item_id = payload.get("ItemId")
-                file_details = get_item_details(item_id)
-                season_id = file_details["Items"][0].get("SeasonId")
-                episode_premiere_date = file_details["Items"][0].get("PremiereDate", "0000-00-00T").split("T")[0]
-                season_details = get_item_details(season_id)
-                series_id = season_details["Items"][0].get("SeriesId")
-                season_date_created = season_details["Items"][0].get("DateCreated", "0000-00-00T").split("T")[0]
-                epi_name = item_name
-                overview = payload.get("Overview")
-
-                if not is_not_within_last_x_days(season_date_created, SEASON_ADDED_WITHIN_X_DAYS):
-                    logging.info(f"(Episode) {series_name} Season {season_num} "
-                                 f"was added within the last {SEASON_ADDED_WITHIN_X_DAYS} "
-                                 f"days. Not sending notification.")
-                    return (f"Сезон был добавлен в последние {SEASON_ADDED_WITHIN_X_DAYS} дней. Уведомление не отправлено.")
-
-                if episode_premiere_date and is_within_last_x_days(episode_premiere_date,
-                                                                   EPISODE_PREMIERED_WITHIN_X_DAYS):
-
-                    notification_message = (
-                        f"*Добавлен новый эпизод*\n\n*Дата премьеры*: {episode_premiere_date}\n\n*Сериал*: {series_name} *S*"
-                        f"{season_num}*E*{season_epi}\n*Название эпизода*: {epi_name}\n\n{overview}\n\n"
-                    )
-                    response = send_telegram_photo(season_id, notification_message)
-
-                    if response.status_code == 200:
-                        mark_item_as_notified(item_type, item_name, release_year)
-                        logging.info(f"(Episode) {series_name} S{season_num}E{season_epi} — уведомление отправлено в Telegram!")
-                        return "Уведомление отправлено в Telegram!"
-                    else:
-                        send_telegram_photo(series_id, notification_message)
-                        logging.warning(f"(Episode) изображение сезона для {series_name} отсутствует, использовано изображение сериала")
-                        mark_item_as_notified(item_type, item_name, release_year)
-                        logging.info(f"(Episode) {series_name} S{season_num}E{season_epi} — уведомление отправлено в Telegram!")
-                        return "Уведомление отправлено в Telegram!"
-
+            details = get_item_details(item_id)
+            season_id = details["Items"][0].get("SeasonId")
+            premiere = details["Items"][0].get("PremiereDate", "").split("T")[0]
+            season_details = get_item_details(season_id)
+            series_id = season_details["Items"][0].get("SeriesId")
+            season_date_created = season_details["Items"][0].get("DateCreated", "").split("T")[0]
+            if not is_not_within_last_x_days(season_date_created, SEASON_ADDED_WITHIN_X_DAYS):
+                logger.info("Season added recently, skip episode notify")
+                return jsonify({"status": "ok", "message": "Season added recently, skipped"}), 200
+            if premiere and is_within_last_x_days(premiere, EPISODE_PREMIERED_WITHIN_X_DAYS):
+                overview = payload.get("Overview", "")
+                message = f"*🎬 Добавлен новый эпизод*\n\n*Дата премьеры*: {premiere}\n\n*Сериал*: {series_name} S{season_num}E{season_epi}\n*Название*: {item_name}\n\n{overview}"
+                resp = send_telegram_photo(season_id, message)
+                if resp and getattr(resp, "status_code", None) == 200:
+                    mark_item_as_notified(item_type, item_name, release_year)
                 else:
-                    logging.info(f"(Episode) {series_name} S{season_num}E{season_epi} "
-                                 f"was premiered more than {EPISODE_PREMIERED_WITHIN_X_DAYS} "
-                                 f"days ago. Not sending notification.")
-                    return (f"Эпизод был добавлен более {EPISODE_PREMIERED_WITHIN_X_DAYS} дней назад. Уведомление не отправлено.")
+                    send_telegram_photo(series_id, message)
+                    mark_item_as_notified(item_type, item_name, release_year)
+                return jsonify({"status": "ok", "message": "Episode processed"}), 200
+            else:
+                logger.info("Episode premiered earlier than threshold, skip")
+                return jsonify({"status": "ok", "message": "Episode too old, skipped"}), 200
 
-        if item_type == "Movie":
-            logging.info(f"(Movie) {item_name} Notification Was Already Sent")
-        elif item_type == "Season":
-            logging.info(f"(Season) {series_name} {item_name} Notification Was Already Sent")
-        elif item_type == "Episode":
-            logging.info(f"(Episode) {series_name} S{season_num}E{season_epi} Notification Was Already Sent")
-        else:
-            logging.error('Item type not supported')
-        return "Тип элемента не поддерживается."
+        logger.error("Unsupported item type: %s", item_type)
+        return jsonify({"status": "error", "message": "Unsupported item type"}), 400
 
-    # Handle specific HTTP errors
-    except HTTPError as http_err:
-        logging.error(f"HTTP error occurred: {http_err}")
-        return str(http_err)
-
-    # Handle generic exceptions
+    except HTTPError as he:
+        logger.error("HTTP error while processing webhook: %s", he)
+        return jsonify({"status": "error", "message": str(he)}), 500
     except Exception as e:
-        logging.error(f"Error: {str(e)}")
-        return f"Error: {str(e)}"
-
+        logger.exception("Ошибка обработки вебхука: %s", e)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    # Для продакшена используйте gunicorn; этот запуск — для локальной отладки
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
