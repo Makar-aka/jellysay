@@ -246,12 +246,10 @@ def announce_new_releases_from_jellyfin():
         # для компактности — вызываем существующую логику через вспомогательную функцию process_payload
         return process_payload(payload)
 
-    except HTTPError as he:
-        logger.error("HTTP error while processing webhook: %s", he)
-        return jsonify({"status": "error", "message": str(he)}), 500
-    except Exception as e:
-        logger.exception("Ошибка обработки вебхука: %s", e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+            # Проверяем, что эпизод премьеровался недавно (если есть)
+            if premiere and not is_within_last_x_days(premiere, EPISODE_PREMIERED_WITHIN_X_DAYS):
+                logger.info("Эпизод премьеровался раньше порога, пропуск: %s", name)
+                return {"status": "ok", "message": "Episode too old, skipped"}, 200     
 
 if __name__ == "__main__":
     # Для продакшена используйте gunicorn; этот запуск — для локальной отладки
